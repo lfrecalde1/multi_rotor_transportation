@@ -422,18 +422,23 @@ class PayloadControlNode(Node):
         n3_d = p[19:22]
 
         # Cost Functions of the system
-        #cost_quaternion_f = self.cost_quaternion_c()
-        #cost_matrix_error_f = self.rotation_matrix_error_c()
+        cost_quaternion_f = self.cost_quaternion_c()
+        cost_matrix_error_f = self.rotation_matrix_error_c()
 
-        angular_error = self.cost_quaternion_c(quat_d, quat)
-        angular_velocity_error = omega - self.rotation_matrix_error_c(quat_d, quat)@omega_d
+        angular_error = cost_quaternion_f(quat_d, quat)
+        print(angular_error.shape)
+        angular_velocity_error = omega - cost_matrix_error_f(quat_d, quat)@omega_d
+        print(angular_velocity_error.shape)
 
         error_position_quad = x_p - x_p_d
         error_velocity_quad = v_p - v_p_d
 
         # Cost functions
         lyapunov_position = (1/2)*self.kp_min*error_position_quad.T@error_position_quad + self.kv_min*(1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + self.c1*error_position_quad.T@error_velocity_quad
+        print(lyapunov_position.shape)
         lyapunov_orientation = self.kr_min*angular_error.T@angular_error + self.kw_min*(1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
+        print(lyapunov_orientation.shape)
+
         
         ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation
         ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation
