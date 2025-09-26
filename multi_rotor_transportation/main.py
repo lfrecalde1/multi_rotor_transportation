@@ -12,6 +12,7 @@ from tf2_ros import TransformBroadcaster
 from scipy.spatial.transform import Rotation as R
 from acados_template import AcadosModel
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver
+from multi_rotor_transportation import plot_tensions, plot_angular_velocities
 
 class PayloadControlNode(Node):
     def __init__(self):
@@ -40,7 +41,7 @@ class PayloadControlNode(Node):
         kp_min = (c1*(kv_min*kv_min) + 2*kv_min*c1 - c1*c1)/((self.mass)*(4*(kv_min - c1)-1))
         kp_min = 80
         self.kp_min = kp_min
-        self.kv_min = 20
+        self.kv_min = 100
         self.c1 = c1
         print(self.kp_min)
         print(self.kv_min)
@@ -55,18 +56,18 @@ class PayloadControlNode(Node):
         kr_min = c2*(kw_min*kw_min)/(min_eigenvalue*(4*(kw_min - (1/2)*c2) - 1))
 
         self.kr_min = kr_min
-        self.kw_min = 20
+        self.kw_min = 100
         self.c2 = c2
-        print(kr_min)
-        print(kw_min)
+        print(self.kr_min)
+        print(self.kw_min)
         print(c2)
         print("--------------------------")
 
 
         # Load shape parameters triangle
-        self.p1 = np.array([0.20, 0.0, 0.0], dtype=np.double)
-        self.p2 = np.array([-0.20, 0.3, 0.0], dtype=np.double)
-        self.p3 = np.array([-0.20, -0.3, 0.0], dtype=np.double)
+        self.p1 = np.array([0.35, 0.0, 0.0], dtype=np.double)
+        self.p2 = np.array([-0.20, 0.35, 0.0], dtype=np.double)
+        self.p3 = np.array([-0.20, -0.35, 0.0], dtype=np.double)
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
         self.length = 1.5
         self.e3 = np.array([0.0, 0.0, 1.0], dtype=np.double)
@@ -81,7 +82,7 @@ class PayloadControlNode(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Position of the system
-        pos_0 = np.array([0.0, 0.0, 1.0], dtype=np.double)
+        pos_0 = np.array([0.0, 0.0, 0.5], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
         vel_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Angular velocity respect to the Body frame
@@ -91,6 +92,7 @@ class PayloadControlNode(Node):
         
         # Initial Wrench
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
+        print(Wrench0)
 
         # Auxiliary vector [x, v, q, w], which is used to update the odometry and the states of the system
         self.init = np.hstack((pos_0, vel_0, quat_0, omega_0))
@@ -98,19 +100,22 @@ class PayloadControlNode(Node):
 
         # Init Tension of the cables
         self.tensions_init = np.linalg.norm(tension_matrix, axis=0)
-        self.n_init = tension_matrix/self.tensions_init
+        self.n_init = -tension_matrix/self.tensions_init
         self.n_init =  self.n_init.flatten(order='F')
 
         # Init states
         self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init))
+        print(np.sum(self.tensions_init))
+        print(self.x_0)
 
         # Init Control Actions or equilibirum
         r_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
         self.u_equilibrium = np.hstack((self.tensions_init, r_init))
+        print(self.u_equilibrium)
 
         # Maximum and minimun control actions
-        tension_min = -2*self.tensions_init
-        tension_max = -1.*self.tensions_init
+        tension_min = 1.*self.tensions_init
+        tension_max = 1.5*self.tensions_init
         r_max = np.array([0.5, 0.5, 0.5]*self.robot_num, dtype=np.double)
         r_min = -r_max
         self.u_min =  np.hstack((tension_min, r_min))
@@ -126,11 +131,14 @@ class PayloadControlNode(Node):
         # OCP
         self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
 
-        # Integration using Acados
+        ## Integration using Acados
         self.acados_integrator = AcadosSimSolver(self.ocp, json_file="acados_sim_" + self.ocp.model.name + ".json", build= True, generate= True)
 
         self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
         self.start_time = time.time()
+
+        #self.timer = self.create_timer(self.ts, self.validation)  # 0.01 seconds = 100 Hz
+        #self.start_time = time.time()
 
 
     def quatTorot_c(self, quat):
@@ -453,7 +461,7 @@ class PayloadControlNode(Node):
         tension_error = t_d - t
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 2*(r_error.T@r_error)
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 5*(r_error.T@r_error) + 10*(tension_error.T@tension_error)
         ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
@@ -529,12 +537,12 @@ class PayloadControlNode(Node):
 
         n = payload[13:22]
 
-        tension = n.reshape((3, self.p.shape[1]), order='F')
+        n = n.reshape((3, self.p.shape[1]), order='F')
 
         quat = np.zeros((3, self.p.shape[1]))
 
         for k in range(0, self.p.shape[1]):
-            quat[:, k] = t + R_ql@self.p[:, k] + (tension[:, k])*self.length
+            quat[:, k] = t + R_ql@self.p[:, k] - 1*(n[:, k])*self.length
         return quat
 
     def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
@@ -653,7 +661,7 @@ class PayloadControlNode(Node):
         tf_p1_q1.header.stamp = self.get_clock().now().to_msg()
         tf_p1_q1.header.frame_id = 'p1_aux'
         tf_p1_q1.child_frame_id = 'quadrotor_1'
-        data_p1_q1 = (tension[:, 0])*self.length
+        data_p1_q1 = -(tension[:, 0])*self.length
         tf_p1_q1.transform.translation.x = data_p1_q1[0]
         tf_p1_q1.transform.translation.y = data_p1_q1[1]
         tf_p1_q1.transform.translation.z = data_p1_q1[2]
@@ -662,7 +670,7 @@ class PayloadControlNode(Node):
         tf_p2_q2.header.stamp = self.get_clock().now().to_msg()
         tf_p2_q2.header.frame_id = 'p2_aux'
         tf_p2_q2.child_frame_id = 'quadrotor_2'
-        data_p2_q2 = (tension[:, 1])*self.length
+        data_p2_q2 = -(tension[:, 1])*self.length
         tf_p2_q2.transform.translation.x = data_p2_q2[0]
         tf_p2_q2.transform.translation.y = data_p2_q2[1]
         tf_p2_q2.transform.translation.z = data_p2_q2[2]
@@ -671,18 +679,30 @@ class PayloadControlNode(Node):
         tf_p3_q3.header.stamp = self.get_clock().now().to_msg()
         tf_p3_q3.header.frame_id = 'p3_aux'
         tf_p3_q3.child_frame_id = 'quadrotor_3'
-        data_p3_q3 = (tension[:, 2])*self.length
+        data_p3_q3 = -(tension[:, 2])*self.length
         tf_p3_q3.transform.translation.x = data_p3_q3[0]
         tf_p3_q3.transform.translation.y = data_p3_q3[1]
         tf_p3_q3.transform.translation.z = data_p3_q3[2]
 
         ## Broadcast both transforms
-        #self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_world_q1, tf_world_q2, tf_world_q3])
-        #self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_q1, tf_world_q2, tf_world_q3])
         self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3])
-        #self.tf_broadcaster.sendTransform([tf_world_load])
         return None
 
+    def validation(self):
+        # Simluation
+        for k in range(0, self.t.shape[0] - self.N_prediction):
+            tic = time.time()
+            # Send Odometry ros
+            self.send_odometry(self.x_0, self.odom_payload_msg, self.publisher_payload_odom_)
+            self.publish_transforms(self.x_0)
+
+            # Section to guarantee same sample times
+            while (time.time() - tic <= self.ts):
+                pass
+            toc = time.time() - tic
+            self.get_logger().info(f"Sample time: {toc:.6f} seconds")
+            self.get_logger().info(f"time: {self.t[k]:.6f} seconds")
+            self.get_logger().info("PAYLOAD DYNAMICS")
     def run(self):
         # Set the states to simulate
         x = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
@@ -696,16 +716,16 @@ class PayloadControlNode(Node):
         ud = np.zeros((self.n_u, self.t.shape[0]), dtype=np.double)
 
         # Set desired states
-        xd[0, :] = 1
-        xd[1, :] = -1
-        xd[2, :] = 2.0
+        xd[0, :] = 2
+        xd[1, :] = 0
+        xd[2, :] = 0.2
 
         xd[3, :] = 0.0
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/4
-        n1 = np.array([0.0, 1.0, 0.0])
+        theta1 = 1*np.pi
+        n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
@@ -719,15 +739,15 @@ class PayloadControlNode(Node):
 
         xd[13, :] = 0.0
         xd[14, :] = 0.0
-        xd[15, :] = 1.0
+        xd[15, :] = -1.0
 
         xd[16, :] = 0.0
         xd[17, :] = 0.0
-        xd[18, :] = 1.0
+        xd[18, :] = -1.0
 
         xd[19, :] = 0.0
         xd[20, :] = 0.0
-        xd[21, :] = 1.0
+        xd[21, :] = -1.0
 
         # Set Desired Control Actions
         ud[0, :] = self.tensions_init[0]
@@ -802,6 +822,8 @@ class PayloadControlNode(Node):
             self.get_logger().info("PAYLOAD DYNAMICS")
         
         # Plot the results 
+        plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
+        plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
 
     
 
