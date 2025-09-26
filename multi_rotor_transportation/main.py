@@ -12,7 +12,7 @@ from tf2_ros import TransformBroadcaster
 from scipy.spatial.transform import Rotation as R
 from acados_template import AcadosModel
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver
-from multi_rotor_transportation import plot_tensions, plot_angular_velocities
+from multi_rotor_transportation import plot_tensions, plot_angular_velocities, plot_quad_position
 
 class PayloadControlNode(Node):
     def __init__(self):
@@ -20,7 +20,7 @@ class PayloadControlNode(Node):
 
         # Time Definition
         self.ts = 0.03
-        self.final = 20
+        self.final = 10
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Prediction Node of the NMPC formulation
@@ -92,7 +92,6 @@ class PayloadControlNode(Node):
         
         # Initial Wrench
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
-        print(Wrench0)
 
         # Auxiliary vector [x, v, q, w], which is used to update the odometry and the states of the system
         self.init = np.hstack((pos_0, vel_0, quat_0, omega_0))
@@ -105,13 +104,10 @@ class PayloadControlNode(Node):
 
         # Init states
         self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init))
-        print(np.sum(self.tensions_init))
-        print(self.x_0)
 
         # Init Control Actions or equilibirum
         r_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
         self.u_equilibrium = np.hstack((self.tensions_init, r_init))
-        print(self.u_equilibrium)
 
         # Maximum and minimun control actions
         tension_min = 1.*self.tensions_init
@@ -525,6 +521,36 @@ class PayloadControlNode(Node):
         for k in range(0, self.p.shape[1]):
             ro[:, k] = t + R_ql@self.p[:, k]
         return ro
+    
+    def quadrotor_position_c(self):
+        x = ca.MX.sym('x', 22, 1)
+
+        x_p   = x[0:3]          # 3x1
+        quat  = x[6:10]         # 4x1
+        nflat = x[13:22]        # (3*m)x1   (assumes your state packs 3*m entries here)
+
+        if isinstance(self.p, np.ndarray):
+            P = ca.DM(self.p)   # 3 x m
+        else:
+            P = self.p          # already a CasADi object with shape 3 x m
+
+        m = P.shape[1]
+
+        # reshape n into 3 x m 
+        n = ca.reshape(nflat, 3, m)  # 3 x m
+
+        # rotation from quaternion
+        Rot = self.quatTorot_c(quat)  # 3 x 3
+
+        # Vectorized expression:
+        # each column: x_p + Rot * p[:,k] - length * n[:,k]
+        quadrotor = ca.repmat(x_p, 1, m) + Rot @ P - (self.length * n)  # 3 x m
+
+        quadrotor_vec = ca.reshape(quadrotor, 3*m, 1)
+
+        quad_position_f = ca.Function('quad_position_f', [x], [quadrotor_vec])
+        return quad_position_f
+
 
     def quadrotors_w(self, payload):
         # Rotation payload
@@ -654,6 +680,7 @@ class PayloadControlNode(Node):
         tf_world_q3.transform.translation.y = quadrotors[1, 2]
         tf_world_q3.transform.translation.z = quadrotors[2, 2]
 
+        # Extract cable direction
         n = payload[13:22]
         tension = n.reshape((3, self.p.shape[1]), order='F')
 
@@ -703,6 +730,7 @@ class PayloadControlNode(Node):
             self.get_logger().info(f"Sample time: {toc:.6f} seconds")
             self.get_logger().info(f"time: {self.t[k]:.6f} seconds")
             self.get_logger().info("PAYLOAD DYNAMICS")
+
     def run(self):
         # Set the states to simulate
         x = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
@@ -766,6 +794,11 @@ class PayloadControlNode(Node):
         ud[10, :] = 0.0
         ud[11, :] = 0.0
 
+        # Create function to compute quadrotor position
+        quadrotor_position = self.quadrotor_position_c()
+        xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
+
         # Reset Solver
         self.acados_ocp_solver.reset()
 
@@ -812,6 +845,9 @@ class PayloadControlNode(Node):
             status_integral = self.acados_integrator.solve()
             xcurrent = self.acados_integrator.get("x")
             x[:, k+1] = xcurrent
+
+            # Update QUadrotors positions
+            xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
             
             # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
@@ -824,6 +860,7 @@ class PayloadControlNode(Node):
         # Plot the results 
         plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
         plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
+        plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
 
     
 
