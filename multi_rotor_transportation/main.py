@@ -453,7 +453,7 @@ class PayloadControlNode(Node):
         tension_error = t_d - t
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 2*(r_error.T@r_error)
         ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
@@ -704,8 +704,8 @@ class PayloadControlNode(Node):
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/2
-        n1 = np.array([0.0, 0.0, 1.0])
+        theta1 = 1*np.pi/4
+        n1 = np.array([0.0, 1.0, 0.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
