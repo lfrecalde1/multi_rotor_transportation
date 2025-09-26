@@ -550,7 +550,45 @@ class PayloadControlNode(Node):
 
         quad_position_f = ca.Function('quad_position_f', [x], [quadrotor_vec])
         return quad_position_f
+    def quadrotor_velocity_c(self):
+        # --- symbols ---
+        # anchors matrix
+        P = ca.DM(self.p) if isinstance(self.p, np.ndarray) else self.p  # 3 x m
+        m = P.shape[1]
+        L = self.length
 
+        # state & input
+        x = ca.MX.sym('x', 22, 1)
+        u = ca.MX.sym('u', 3 + 3*m, 1)  # general: 3 thrust comps + 3m 'r' comps
+
+        # unpack state
+        x_p   = x[0:3]      # 3x1
+        v_p   = x[3:6]      # 3x1
+        quat  = x[6:10]     # 4x1
+        omega = x[10:13]    # 3x1
+        nflat = x[13:13+3*m]
+        n     = ca.reshape(nflat, 3, m)  # 3 x m
+
+        # unpack input
+        t = u[0:3]                  # optional thrust vector (unused here)
+        r = ca.reshape(u[3:], 3, m) # 3 x m (per-link angular velocities of n)
+
+        # rotation
+        R = self.quatTorot_c(quat)  # 3 x 3
+
+        # build velocities per anchor (safe column-wise construction)
+        cols = []
+        for k in range(m):
+            term_rot = R @ ca.cross(omega, P[:, k])        # R (omega x p_k)
+            term_n   = L * ca.cross(r[:, k], n[:, k])      # L (r_k x n_k) = L n_dot_k
+            v_k      = v_p + term_rot - term_n             # v_p + R(ω×p_k) - L(r_k×n_k)
+            cols.append(v_k)
+
+        quad_vel_mat = ca.hcat(cols)             # 3 x m
+        quad_vel_vec = ca.reshape(quad_vel_mat, 3*m, 1)  # (3m) x 1
+
+        quad_velocity_f = ca.Function('quad_velocity_f', [x, u], [quad_vel_vec])
+        return quad_velocity_f
 
     def quadrotors_w(self, payload):
         # Rotation payload
