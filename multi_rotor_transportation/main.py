@@ -40,7 +40,7 @@ class PayloadControlNode(Node):
         kp_min = (c1*(kv_min*kv_min) + 2*kv_min*c1 - c1*c1)/((self.mass)*(4*(kv_min - c1)-1))
         kp_min = 80
         self.kp_min = kp_min
-        self.kv_min = kv_min
+        self.kv_min = 20
         self.c1 = c1
         print(self.kp_min)
         print(self.kv_min)
@@ -55,7 +55,7 @@ class PayloadControlNode(Node):
         kr_min = c2*(kw_min*kw_min)/(min_eigenvalue*(4*(kw_min - (1/2)*c2) - 1))
 
         self.kr_min = kr_min
-        self.kw_min = kw_min
+        self.kw_min = 20
         self.c2 = c2
         print(kr_min)
         print(kw_min)
@@ -68,6 +68,7 @@ class PayloadControlNode(Node):
         self.p2 = np.array([-0.20, 0.3, 0.0], dtype=np.double)
         self.p3 = np.array([-0.20, -0.3, 0.0], dtype=np.double)
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
+        self.length = 1.5
         self.e3 = np.array([0.0, 0.0, 1.0], dtype=np.double)
 
         # Payload odometry
@@ -76,6 +77,7 @@ class PayloadControlNode(Node):
 
         self.odom_payload_desired_msg = Odometry()
         self.publisher_payload_desired_odom_ = self.create_publisher(Odometry, "desired", 10)
+
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Position of the system
@@ -101,34 +103,35 @@ class PayloadControlNode(Node):
 
         # Init states
         self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init))
-        print(self.x_0)
 
         # Init Control Actions or equilibirum
         r_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
         self.u_equilibrium = np.hstack((self.tensions_init, r_init))
-        print(self.u_equilibrium)
 
         # Maximum and minimun control actions
-        tension_min = 1*self.tensions_init
-        tension_max = 2.*self.tensions_init
+        tension_min = -2*self.tensions_init
+        tension_max = -1.*self.tensions_init
         r_max = np.array([0.5, 0.5, 0.5]*self.robot_num, dtype=np.double)
         r_min = -r_max
         self.u_min =  np.hstack((tension_min, r_min))
         self.u_max =  np.hstack((tension_max, r_max))
 
+        # Define state dimension and control action
+        self.n_x = self.x_0.shape[0]
+        self.n_u = self.u_equilibrium.shape[0]
+
         # Create Model and OCP of the sytem        
-        self.payloadModel()
         self.ocp = self.solver(self.x_0)
 
         # OCP
         self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
 
-    
         # Integration using Acados
         self.acados_integrator = AcadosSimSolver(self.ocp, json_file="acados_sim_" + self.ocp.model.name + ".json", build= True, generate= True)
 
-        #self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
-        #self.start_time = time.time()
+        self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
+        self.start_time = time.time()
+
 
     def quatTorot_c(self, quat):
         # Normalized quaternion
@@ -412,6 +415,10 @@ class PayloadControlNode(Node):
         n2 = x[16:19]
         n3 = x[19:22]
 
+        # Split control actions
+        t = u[0:3]
+        r = u[3:12]
+
         # Get desired states of the system
         x_p_d = p[0:3]
         v_p_d = p[3:6]
@@ -420,28 +427,34 @@ class PayloadControlNode(Node):
         n1_d = p[13:16]
         n2_d = p[16:19]
         n3_d = p[19:22]
+        t_d = p[22:25]
+        r_d = p[25:34]
 
         # Cost Functions of the system
         cost_quaternion_f = self.cost_quaternion_c()
         cost_matrix_error_f = self.rotation_matrix_error_c()
 
         angular_error = cost_quaternion_f(quat_d, quat)
-        print(angular_error.shape)
         angular_velocity_error = omega - cost_matrix_error_f(quat_d, quat)@omega_d
-        print(angular_velocity_error.shape)
 
         error_position_quad = x_p - x_p_d
         error_velocity_quad = v_p - v_p_d
 
         # Cost functions
         lyapunov_position = (1/2)*self.kp_min*error_position_quad.T@error_position_quad + self.kv_min*(1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + self.c1*error_position_quad.T@error_velocity_quad
-        print(lyapunov_position.shape)
         lyapunov_orientation = self.kr_min*angular_error.T@angular_error + self.kw_min*(1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
-        print(lyapunov_orientation.shape)
 
-        
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation
+        # Error cable direction
+        error_n1 = ca.cross(n1_d, n1)
+        error_n2 = ca.cross(n2_d, n2)
+        error_n3 = ca.cross(n3_d, n3)
+
+        # Cost Function control actions
+        tension_error = t_d - t
+        r_error = r_d - r
+
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -458,8 +471,7 @@ class PayloadControlNode(Node):
         ocp.solver_options.qp_solver = "FULL_CONDENSING_HPIPM" 
         ocp.solver_options.qp_solver_cond_N = self.N_prediction // 4
         ocp.solver_options.hessian_approx = "GAUSS_NEWTON"  
-        ocp.solver_options.regularize_method = "CONVEXIFY"  
-        ocp.solver_options.integrator_type = "IRK"
+        ocp.solver_options.integrator_type = "ERK"
         ocp.solver_options.nlp_solver_type = "SQP_RTI"
         ocp.solver_options.Tsim = self.ts
         ocp.solver_options.tf = self.t_N
@@ -490,6 +502,308 @@ class PayloadControlNode(Node):
         tension = np.linalg.pinv(P)@wrench
         tensions_vectors = tension.reshape(-1, 3).T
         return tensions_vectors, P, tension
+
+    def ro_w(self, payload):
+        # Rotation payload
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        # Translation
+        t = payload[0:3]
+
+        ro = np.zeros((3, self.p.shape[1]))
+
+        for k in range(0, self.p.shape[1]):
+            ro[:, k] = t + R_ql@self.p[:, k]
+        return ro
+
+    def quadrotors_w(self, payload):
+        # Rotation payload
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        # Translation
+        t = payload[0:3]
+
+        n = payload[13:22]
+
+        tension = n.reshape((3, self.p.shape[1]), order='F')
+
+        quat = np.zeros((3, self.p.shape[1]))
+
+        for k in range(0, self.p.shape[1]):
+            quat[:, k] = t + R_ql@self.p[:, k] + (tension[:, k])*self.length
+        return quat
+
+    def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
+        position = x[0:3]
+        quat = x[6:10]
+
+        # Function that send odometry
+
+        odom_payload_msg.header.frame_id = "world"
+        odom_payload_msg.header.stamp = self.get_clock().now().to_msg()
+
+        odom_payload_msg.pose.pose.position.x = position[0]
+        odom_payload_msg.pose.pose.position.y = position[1]
+        odom_payload_msg.pose.pose.position.z = position[2]
+
+        odom_payload_msg.pose.pose.orientation.x = quat[1]
+        odom_payload_msg.pose.pose.orientation.y = quat[2]
+        odom_payload_msg.pose.pose.orientation.z = quat[3]
+        odom_payload_msg.pose.pose.orientation.w = quat[0]
+
+        # Send Messag
+        publisher_payload_odom.publish(odom_payload_msg)
+        return None 
+
+    def publish_transforms(self, payload):
+        tf_world_load = TransformStamped()
+        tf_world_load.header.stamp = self.get_clock().now().to_msg()
+        tf_world_load.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_load.child_frame_id = 'payload'          # <-- imu_link is rotated
+        tf_world_load.transform.translation.x = payload[0]
+        tf_world_load.transform.translation.y = payload[1]
+        tf_world_load.transform.translation.z = payload[2]
+        tf_world_load.transform.rotation.x = payload[7]
+        tf_world_load.transform.rotation.y = payload[8]
+        tf_world_load.transform.rotation.z = payload[9]
+        tf_world_load.transform.rotation.w = payload[6]
+## --------------------------------------------------------------------------------------------------------------------
+        ro = self.ro_w(payload)
+        tf_payload_p1 = TransformStamped()
+        tf_payload_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p1.header.frame_id = 'payload'
+        tf_payload_p1.child_frame_id = 'p1'
+        tf_payload_p1.transform.translation.x = self.p1[0]
+        tf_payload_p1.transform.translation.y = self.p1[1]
+        tf_payload_p1.transform.translation.z = self.p1[2]
+
+        tf_payload_p2 = TransformStamped()
+        tf_payload_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p2.header.frame_id = 'payload'
+        tf_payload_p2.child_frame_id = 'p2'
+        tf_payload_p2.transform.translation.x = self.p2[0]
+        tf_payload_p2.transform.translation.y = self.p2[1]
+        tf_payload_p2.transform.translation.z = self.p2[2]
+
+        tf_payload_p3 = TransformStamped()
+        tf_payload_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p3.header.frame_id = 'payload'
+        tf_payload_p3.child_frame_id = 'p3'
+        tf_payload_p3.transform.translation.x = self.p3[0]
+        tf_payload_p3.transform.translation.y = self.p3[1]
+        tf_payload_p3.transform.translation.z = self.p3[2]
+
+        tf_world_p1 = TransformStamped()
+        tf_world_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p1.header.frame_id = 'world'
+        tf_world_p1.child_frame_id = 'p1_aux'
+        tf_world_p1.transform.translation.x = ro[0, 0]
+        tf_world_p1.transform.translation.y = ro[1, 0]
+        tf_world_p1.transform.translation.z = ro[2, 0]
+
+        tf_world_p2 = TransformStamped()
+        tf_world_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p2.header.frame_id = 'world'
+        tf_world_p2.child_frame_id = 'p2_aux'
+        tf_world_p2.transform.translation.x = ro[0, 1]
+        tf_world_p2.transform.translation.y = ro[1, 1]
+        tf_world_p2.transform.translation.z = ro[2, 1]
+
+        tf_world_p3 = TransformStamped()
+        tf_world_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p3.header.frame_id = 'world'
+        tf_world_p3.child_frame_id = 'p3_aux'
+        tf_world_p3.transform.translation.x = ro[0, 2]
+        tf_world_p3.transform.translation.y = ro[1, 2]
+        tf_world_p3.transform.translation.z = ro[2, 2]
+
+        quadrotors = self.quadrotors_w(payload)
+        tf_world_q1 = TransformStamped()
+        tf_world_q1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q1.header.frame_id = 'world'
+        tf_world_q1.child_frame_id = 'quadrotor_1_world'
+        tf_world_q1.transform.translation.x = quadrotors[0, 0]
+        tf_world_q1.transform.translation.y = quadrotors[1, 0]
+        tf_world_q1.transform.translation.z = quadrotors[2, 0]
+
+        tf_world_q2 = TransformStamped()
+        tf_world_q2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q2.header.frame_id = 'world'
+        tf_world_q2.child_frame_id = 'quadrotor_2_world'
+        tf_world_q2.transform.translation.x = quadrotors[0, 1]
+        tf_world_q2.transform.translation.y = quadrotors[1, 1]
+        tf_world_q2.transform.translation.z = quadrotors[2, 1]
+
+        tf_world_q3 = TransformStamped()
+        tf_world_q3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q3.header.frame_id = 'world'
+        tf_world_q3.child_frame_id = 'quadrotor_3_world'
+        tf_world_q3.transform.translation.x = quadrotors[0, 2]
+        tf_world_q3.transform.translation.y = quadrotors[1, 2]
+        tf_world_q3.transform.translation.z = quadrotors[2, 2]
+
+        n = payload[13:22]
+        tension = n.reshape((3, self.p.shape[1]), order='F')
+
+        tf_p1_q1 = TransformStamped()
+        tf_p1_q1.header.stamp = self.get_clock().now().to_msg()
+        tf_p1_q1.header.frame_id = 'p1_aux'
+        tf_p1_q1.child_frame_id = 'quadrotor_1'
+        data_p1_q1 = (tension[:, 0])*self.length
+        tf_p1_q1.transform.translation.x = data_p1_q1[0]
+        tf_p1_q1.transform.translation.y = data_p1_q1[1]
+        tf_p1_q1.transform.translation.z = data_p1_q1[2]
+
+        tf_p2_q2 = TransformStamped()
+        tf_p2_q2.header.stamp = self.get_clock().now().to_msg()
+        tf_p2_q2.header.frame_id = 'p2_aux'
+        tf_p2_q2.child_frame_id = 'quadrotor_2'
+        data_p2_q2 = (tension[:, 1])*self.length
+        tf_p2_q2.transform.translation.x = data_p2_q2[0]
+        tf_p2_q2.transform.translation.y = data_p2_q2[1]
+        tf_p2_q2.transform.translation.z = data_p2_q2[2]
+
+        tf_p3_q3 = TransformStamped()
+        tf_p3_q3.header.stamp = self.get_clock().now().to_msg()
+        tf_p3_q3.header.frame_id = 'p3_aux'
+        tf_p3_q3.child_frame_id = 'quadrotor_3'
+        data_p3_q3 = (tension[:, 2])*self.length
+        tf_p3_q3.transform.translation.x = data_p3_q3[0]
+        tf_p3_q3.transform.translation.y = data_p3_q3[1]
+        tf_p3_q3.transform.translation.z = data_p3_q3[2]
+
+        ## Broadcast both transforms
+        #self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_world_q1, tf_world_q2, tf_world_q3])
+        #self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_q1, tf_world_q2, tf_world_q3])
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3])
+        #self.tf_broadcaster.sendTransform([tf_world_load])
+        return None
+
+    def run(self):
+        # Set the states to simulate
+        x = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        u = np.zeros((self.n_u, self.t.shape[0] - self.N_prediction), dtype=np.double)
+
+        # initial States of the system
+        x[:, 0] = self.x_0
+
+        # Desired states and control actions
+        xd = np.zeros((self.n_x, self.t.shape[0] + 1), dtype=np.double)
+        ud = np.zeros((self.n_u, self.t.shape[0]), dtype=np.double)
+
+        # Set desired states
+        xd[0, :] = 1
+        xd[1, :] = -1
+        xd[2, :] = 2.0
+
+        xd[3, :] = 0.0
+        xd[4, :] = 0.0
+        xd[5, :] = 0.0
+
+        theta1 = 1*np.pi/2
+        n1 = np.array([0.0, 0.0, 1.0])
+        qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
+
+        xd[6, :] = qd[0]
+        xd[7, :] = qd[1]
+        xd[8, :] = qd[2]
+        xd[9, :] = qd[3]
+        ##
+        xd[10, :] = 0.0
+        xd[11, :] = 0.0
+        xd[12, :] = 0.0
+
+        xd[13, :] = 0.0
+        xd[14, :] = 0.0
+        xd[15, :] = 1.0
+
+        xd[16, :] = 0.0
+        xd[17, :] = 0.0
+        xd[18, :] = 1.0
+
+        xd[19, :] = 0.0
+        xd[20, :] = 0.0
+        xd[21, :] = 1.0
+
+        # Set Desired Control Actions
+        ud[0, :] = self.tensions_init[0]
+        ud[1, :] = self.tensions_init[1]
+        ud[2, :] = self.tensions_init[2]
+
+        ud[3, :] = 0.0
+        ud[4, :] = 0.0
+        ud[5, :] = 0.0
+
+        ud[6, :] = 0.0
+        ud[7, :] = 0.0
+        ud[8, :] = 0.0
+
+        ud[9, :] = 0.0
+        ud[10, :] = 0.0
+        ud[11, :] = 0.0
+
+        # Reset Solver
+        self.acados_ocp_solver.reset()
+
+        # Initial Conditions optimization problem
+        for stage in range(self.N_prediction + 1):
+            self.acados_ocp_solver.set(stage, "x", x[:, 0])
+        for stage in range(self.N_prediction):
+            self.acados_ocp_solver.set(stage, "u", ud[:, 0])
+
+        # Simluation
+        for k in range(0, self.t.shape[0] - self.N_prediction):
+            tic = time.time()
+            # Send Odometry ros
+            self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
+            self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
+            self.publish_transforms(x[:, k])
+
+            self.acados_ocp_solver.set(0, "lbx", x[:, k])
+            self.acados_ocp_solver.set(0, "ubx", x[:, k])
+
+            # Desired Trajectory of the system
+            for j in range(self.N_prediction):
+                yref = xd[:,k+j]
+                uref = ud[:,k+j]
+                aux_ref = np.hstack((yref, uref))
+                self.acados_ocp_solver.set(j, "p", aux_ref)
+
+            # Desired Trayectory at the last Horizon
+            yref_N = xd[:,k+self.N_prediction]
+            uref_N = ud[:,k+self.N_prediction]
+            aux_ref_N = np.hstack((yref_N, uref_N))
+            self.acados_ocp_solver.set(self.N_prediction, "p", aux_ref_N)
+
+            # Check Solution since there can be possible errors 
+            self.acados_ocp_solver.solve()
+
+            aux_control = self.acados_ocp_solver.get(0, "u")
+            u[:, k] = aux_control
+
+            # Update Data of the system
+            self.acados_integrator.set("x", x[:, k])
+            self.acados_integrator.set("u", u[:, k])
+
+            status_integral = self.acados_integrator.solve()
+            xcurrent = self.acados_integrator.get("x")
+            x[:, k+1] = xcurrent
+            
+            # Section to guarantee same sample times
+            while (time.time() - tic <= self.ts):
+                pass
+            toc = time.time() - tic
+            self.get_logger().info(f"Sample time: {toc:.6f} seconds")
+            self.get_logger().info(f"time: {self.t[k]:.6f} seconds")
+            self.get_logger().info("PAYLOAD DYNAMICS")
+        
+        # Plot the results 
+
+    
 
 def main(arg = None):
     rclpy.init(args=arg)
