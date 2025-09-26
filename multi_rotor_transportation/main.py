@@ -12,8 +12,7 @@ from tf2_ros import TransformBroadcaster
 from scipy.spatial.transform import Rotation as R
 from acados_template import AcadosModel
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver
-from multi_rotor_transportation import plot_tensions, plot_angular_velocities, plot_quad_position
-
+from multi_rotor_transportation import plot_tensions, plot_angular_velocities, plot_quad_position, plot_quad_velocity
 class PayloadControlNode(Node):
     def __init__(self):
         super().__init__('PayloadDynamics')
@@ -110,7 +109,7 @@ class PayloadControlNode(Node):
         self.u_equilibrium = np.hstack((self.tensions_init, r_init))
 
         # Maximum and minimun control actions
-        tension_min = 1.*self.tensions_init
+        tension_min = 0.5*self.tensions_init
         tension_max = 1.5*self.tensions_init
         r_max = np.array([0.5, 0.5, 0.5]*self.robot_num, dtype=np.double)
         r_min = -r_max
@@ -552,7 +551,6 @@ class PayloadControlNode(Node):
         return quad_position_f
     def quadrotor_velocity_c(self):
         # --- symbols ---
-        # anchors matrix
         P = ca.DM(self.p) if isinstance(self.p, np.ndarray) else self.p  # 3 x m
         m = P.shape[1]
         L = self.length
@@ -583,10 +581,8 @@ class PayloadControlNode(Node):
             term_n   = L * ca.cross(r[:, k], n[:, k])      # L (r_k x n_k) = L n_dot_k
             v_k      = v_p + term_rot - term_n             # v_p + R(ω×p_k) - L(r_k×n_k)
             cols.append(v_k)
-
         quad_vel_mat = ca.hcat(cols)             # 3 x m
         quad_vel_vec = ca.reshape(quad_vel_mat, 3*m, 1)  # (3m) x 1
-
         quad_velocity_f = ca.Function('quad_velocity_f', [x, u], [quad_vel_vec])
         return quad_velocity_f
 
@@ -783,15 +779,15 @@ class PayloadControlNode(Node):
 
         # Set desired states
         xd[0, :] = 2
-        xd[1, :] = 0
-        xd[2, :] = 0.2
+        xd[1, :] = 2
+        xd[2, :] = 2
 
         xd[3, :] = 0.0
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi
-        n1 = np.array([0.0, 0.0, 1.0])
+        theta1 = 1*np.pi/4
+        n1 = np.array([0.0, 1.0, 0.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
@@ -832,10 +828,18 @@ class PayloadControlNode(Node):
         ud[10, :] = 0.0
         ud[11, :] = 0.0
 
+        u[:, 0] = ud[:, 0]
+
+
         # Create function to compute quadrotor position
         quadrotor_position = self.quadrotor_position_c()
+        quadrotor_velocity = self.quadrotor_velocity_c()
+
         xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
+
+        xQ_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        xQ_dot[:, 0] = np.array(quadrotor_velocity(x[:, 0], u[:, 0])).reshape((self.robot_num*3, ))
 
         # Reset Solver
         self.acados_ocp_solver.reset()
@@ -886,6 +890,7 @@ class PayloadControlNode(Node):
 
             # Update QUadrotors positions
             xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
+            xQ_dot[:, k+1] = np.array(quadrotor_velocity(x[:, k+1], u[:,k])).reshape((self.robot_num*3, ))
             
             # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
@@ -899,6 +904,7 @@ class PayloadControlNode(Node):
         plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
         plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
         plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
+        plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
 
     
 
