@@ -124,10 +124,10 @@ class PayloadControlNode(Node):
         self.ocp = self.solver(self.x_0)
 
         # OCP
-        self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
+        self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= False, generate= False)
 
         ## Integration using Acados
-        self.acados_integrator = AcadosSimSolver(self.ocp, json_file="acados_sim_" + self.ocp.model.name + ".json", build= True, generate= True)
+        self.acados_integrator = AcadosSimSolver(self.ocp, json_file="acados_sim_" + self.ocp.model.name + ".json", build= False, generate= False)
 
         self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
         self.start_time = time.time()
@@ -786,8 +786,8 @@ class PayloadControlNode(Node):
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/4
-        n1 = np.array([0.0, 1.0, 0.0])
+        theta1 = 1*np.pi/2
+        n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
