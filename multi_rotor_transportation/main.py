@@ -19,7 +19,7 @@ class PayloadControlNode(Node):
 
         # Time Definition
         self.ts = 0.03
-        self.final = 10
+        self.final = 20
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Prediction Node of the NMPC formulation
@@ -587,6 +587,7 @@ class PayloadControlNode(Node):
         # Cost Functions of the system
         cost_quaternion_f = self.cost_quaternion_c()
         cost_matrix_error_f = self.rotation_matrix_error_c()
+        quadrotor_velocity_f = self.quadrotor_velocity_c()
 
         angular_error = cost_quaternion_f(quat_d, quat)
         angular_velocity_error = omega - cost_matrix_error_f(quat_d, quat)@omega_d
@@ -607,7 +608,10 @@ class PayloadControlNode(Node):
         tension_error = t_d - t
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 5*(r_error.T@r_error) + 10*(tension_error.T@tension_error)
+        # Quadrotor velocities based on payload velocity, rotation matrix, angular velocity and control action
+        quadrotors_velocity = quadrotor_velocity_f(x, u)
+
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 5*(r_error.T@r_error) + 10*(tension_error.T@tension_error) + 20*(quadrotors_velocity.T@quadrotors_velocity)
         ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
