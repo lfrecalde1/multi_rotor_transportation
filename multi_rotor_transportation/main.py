@@ -1018,7 +1018,7 @@ class PayloadControlNode(Node):
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/2
+        theta1 = 1*np.pi
         n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
