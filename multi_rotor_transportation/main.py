@@ -131,9 +131,9 @@ class PayloadControlNode(Node):
         quadrotor_position = self.quadrotor_position_c()
         quad_total_positions = np.array(quadrotor_position(self.x_0)).reshape((self.robot_num*3, ))
 
-        quad_1_model = self.quadrotorModel(1)
-        quad_2_model = self.quadrotorModel(2)
-        quad_3_model = self.quadrotorModel(3)
+        self.quad_1_model, self.nx_quad, self.nu_quad = self.quadrotorModel(1)
+        self.quad_2_model, _, _ = self.quadrotorModel(2)
+        self.quad_3_model, _, _ = self.quadrotorModel(3)
 
         # Create the initial states for quadrotor
         pos_quad_1 = np.array(quad_total_positions[0:3], dtype=np.double)
@@ -159,6 +159,10 @@ class PayloadControlNode(Node):
         omega_quad_3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Initial Orientation expressed as quaternionn
         quat_quad_3 = np.array([1.0, 0.0, 0.0, 0.0])
+
+        self.xq1_0 = np.hstack((pos_quad_1, vel_quad_1, quat_quad_1, omega_quad_1))
+        self.xq2_0 = np.hstack((pos_quad_2, vel_quad_2, quat_quad_2, omega_quad_2))
+        self.xq3_0 = np.hstack((pos_quad_3, vel_quad_3, quat_quad_3, omega_quad_3))
 
         # OCP
         self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
@@ -327,6 +331,10 @@ class PayloadControlNode(Node):
         cc_forces = ca.cross(omega, I_sym @ omega)
         omega_dot = ca.solve(I_sym, -cc_forces + tau)
 
+        # Size of the system
+        nx = x.shape[0]
+        nu = u.shape[0]
+
         # Explicit Dynamics
         f_expl = ca.vertcat(linear_velocity, linear_acceleration, quat_dt, omega_dot)
 
@@ -343,7 +351,7 @@ class PayloadControlNode(Node):
         casadi_kutta = Function(f"quadrotor_dynamics_kuta_{number}",[x, u, ts], [xk]) 
 
         # Create Runge Kutta Integrator
-        return casadi_kutta
+        return casadi_kutta, nx, nu
 
     def payloadModel(self)->AcadosModel:
         # Model Name
@@ -748,7 +756,9 @@ class PayloadControlNode(Node):
         publisher_payload_odom.publish(odom_payload_msg)
         return None 
 
-    def publish_transforms(self, payload):
+    def publish_transforms(self, payload, quad1):
+        # Payload
+## -------------------------------------------------------------------------------------------------------------------
         tf_world_load = TransformStamped()
         tf_world_load.header.stamp = self.get_clock().now().to_msg()
         tf_world_load.header.frame_id = 'world'            # <-- world is the parent
@@ -760,6 +770,19 @@ class PayloadControlNode(Node):
         tf_world_load.transform.rotation.y = payload[8]
         tf_world_load.transform.rotation.z = payload[9]
         tf_world_load.transform.rotation.w = payload[6]
+
+        # Quadrotor
+        tf_world_quad1 = TransformStamped()
+        tf_world_quad1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad1.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad1.child_frame_id = 'quad1'          # <-- imu_link is rotated
+        tf_world_quad1.transform.translation.x = quad1[0]
+        tf_world_quad1.transform.translation.y = quad1[1]
+        tf_world_quad1.transform.translation.z = quad1[2]
+        tf_world_quad1.transform.rotation.x = quad1[7]
+        tf_world_quad1.transform.rotation.y = quad1[8]
+        tf_world_quad1.transform.rotation.z = quad1[9]
+        tf_world_quad1.transform.rotation.w = quad1[6]
 ## --------------------------------------------------------------------------------------------------------------------
         ro = self.ro_w(payload)
         tf_payload_p1 = TransformStamped()
@@ -867,7 +890,7 @@ class PayloadControlNode(Node):
         tf_p3_q3.transform.translation.z = data_p3_q3[2]
 
         ## Broadcast both transforms
-        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3])
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_quad1])
         return None
 
     def validation(self):
@@ -951,16 +974,29 @@ class PayloadControlNode(Node):
 
         u[:, 0] = ud[:, 0]
 
-
         # Create function to compute quadrotor position
         quadrotor_position = self.quadrotor_position_c()
         quadrotor_velocity = self.quadrotor_velocity_c()
 
+        # Positions and velocities from the planning
         xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
 
         xQ_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ_dot[:, 0] = np.array(quadrotor_velocity(x[:, 0], u[:, 0])).reshape((self.robot_num*3, ))
+
+        # Empty states for each quadrotor
+        xq1 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq1 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq1[:, 0] = self.xq1_0
+
+        xq2 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq2 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq2[:, 0] = self.xq2_0
+
+        xq3 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq3 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq3[:, 0] = self.xq3_0
 
         # Reset Solver
         self.acados_ocp_solver.reset()
@@ -977,7 +1013,7 @@ class PayloadControlNode(Node):
             # Send Odometry ros
             self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
             self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
-            self.publish_transforms(x[:, k])
+            self.publish_transforms(x[:, k], xq1[:, k])
 
             self.acados_ocp_solver.set(0, "lbx", x[:, k])
             self.acados_ocp_solver.set(0, "ubx", x[:, k])
@@ -1012,6 +1048,11 @@ class PayloadControlNode(Node):
             # Update QUadrotors positions
             xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
             xQ_dot[:, k+1] = np.array(quadrotor_velocity(x[:, k+1], u[:,k])).reshape((self.robot_num*3, ))
+
+            # Update quadrotors
+            xq1[:, k+1] = np.array(self.quad_1_model(xq1[:, k], [self.mass_quad*self.gravity, 0, 0, 0], self.ts)).reshape((self.nx_quad, ))
+            xq2[:, k+1] = np.array(self.quad_1_model(xq2[:, k], [self.mass_quad*self.gravity, 0, 0, 0], self.ts)).reshape((self.nx_quad, ))
+            xq3[:, k+1] = np.array(self.quad_1_model(xq3[:, k], [self.mass_quad*self.gravity, 0, 0, 0], self.ts)).reshape((self.nx_quad, ))
             
             # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
