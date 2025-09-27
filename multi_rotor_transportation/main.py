@@ -1010,8 +1010,8 @@ class PayloadControlNode(Node):
         ud = np.zeros((self.n_u, self.t.shape[0]), dtype=np.double)
 
         # Set desired states
-        xd[0, :] = 2
-        xd[1, :] = 2
+        xd[0, :] = 5
+        xd[1, :] = 5
         xd[2, :] = 2
 
         xd[3, :] = 0.0
