@@ -112,6 +112,9 @@ class PayloadControlNode(Node):
         r_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
         self.u_equilibrium = np.hstack((self.tensions_init, r_init))
 
+        print(self.x_0.shape)
+        print(self.u_equilibrium.shape)
+
         # Maximum and minimun control actions
         tension_min = 0.5*self.tensions_init
         tension_max = 2.5*self.tensions_init
