@@ -1,1 +1,2 @@
-from .plots import plot_tensions, plot_angular_velocities, plot_quad_position, plot_quad_velocity
+from .plots import plot_tensions, plot_angular_velocities, plot_quad_position, plot_quad_velocity, plot_quad_position_desired, plot_quad_velocity_desired, plot_angular_velocities_aux
+from .plots import plot_angular_cable_desired

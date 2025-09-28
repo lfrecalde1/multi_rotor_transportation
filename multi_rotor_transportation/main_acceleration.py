@@ -13,6 +13,7 @@ from scipy.spatial.transform import Rotation as R
 from acados_template import AcadosModel
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
 from multi_rotor_transportation import plot_tensions, plot_angular_velocities, plot_quad_position, plot_quad_velocity, plot_quad_position_desired, plot_quad_velocity_desired
+from multi_rotor_transportation import plot_angular_velocities_aux, plot_angular_cable_desired
 class PayloadControlNode(Node):
     def __init__(self):
         super().__init__('PayloadDynamics')
@@ -783,6 +784,44 @@ class PayloadControlNode(Node):
         quad_velocity_f = ca.Function('quad_velocity_f', [x, u], [quad_vel_vec])
         return quad_velocity_f
 
+    def cable_angular_velocity_c(self):
+        # --- symbols ---
+        P = ca.DM(self.p) if isinstance(self.p, np.ndarray) else self.p  # 3 x m
+        m = P.shape[1]
+        L = self.length
+
+        # state & input
+        x = ca.MX.sym('x', 22, 1)
+        xQ = ca.MX.sym('xQ', 3*m, 1)  # general: 3 thrust comps + 3m 'r' comps
+
+        # unpack state
+        x_p   = x[0:3]      # 3x1
+        v_p   = x[3:6]      # 3x1
+        quat  = x[6:10]     # 4x1
+        omega = x[10:13]    # 3x1
+        nflat = x[13:13+3*m]
+        n     = ca.reshape(nflat, 3, m)  # 3 x m
+
+        # unpack Quadrotor velocity
+        v_Q = ca.reshape(xQ, 3, m) # 3 x m (per-link angular velocities of n)
+
+
+        # rotation
+        R = self.quatTorot_c(quat)  # 3 x 3
+
+        # build velocities per anchor (safe column-wise construction)
+        cols = []
+        for k in range(m):
+            term_rot = R @ ca.cross(omega, P[:, k])        # R (omega x p_k)
+            term_quad_velocity   = v_Q[:, k]
+            n_dot_k      = (v_p + term_rot - term_quad_velocity)/L
+            r_k = ca.cross(n[:, k], n_dot_k)
+            cols.append(r_k)
+        r_mat = ca.hcat(cols)             # 3 x m
+        r_vec = ca.reshape(r_mat, 3*m, 1)  # (3m) x 1
+        r_velocity_f = ca.Function('r_velocity_f', [x, xQ], [r_vec])
+        return r_velocity_f
+
     def quadrotors_w(self, payload):
         # Rotation payload
         q = np.array([payload[7], payload[8], payload[9], payload[6]])
@@ -1069,6 +1108,7 @@ class PayloadControlNode(Node):
         # Create function to compute quadrotor position
         quadrotor_position = self.quadrotor_position_c()
         quadrotor_velocity = self.quadrotor_velocity_c()
+        cable_angular_velocity = self.cable_angular_velocity_c()
 
         # Positions and velocities from the planning
         xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
@@ -1076,6 +1116,9 @@ class PayloadControlNode(Node):
 
         xQ_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ_dot[:, 0] = np.array(quadrotor_velocity(x[:, 0], u[:, 0])).reshape((self.robot_num*3, ))
+
+        rQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        rQ[:, 0] = np.array(cable_angular_velocity(x[:, 0], xQ_dot[:, 0])).reshape((self.robot_num*3, ))
 
         # Empty states for each quadrotor
         xq1 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
@@ -1146,6 +1189,8 @@ class PayloadControlNode(Node):
             xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
             xQ_dot[:, k+1] = np.array(quadrotor_velocity(x[:, k+1], u[:,k])).reshape((self.robot_num*3, ))
 
+            rQ[:, k+1] = np.array(cable_angular_velocity(x[:, k+1], xQ_dot[:, k+1])).reshape((self.robot_num*3, ))
+
             # Update quadrotors
             xq1[:, k+1] = np.array(self.quad_1_model(xq1[:, k], uM_q1, self.ts)).reshape((self.nx_quad, ))
             xq2[:, k+1] = np.array(self.quad_1_model(xq2[:, k], uM_q2, self.ts)).reshape((self.nx_quad, ))
@@ -1166,7 +1211,7 @@ class PayloadControlNode(Node):
         plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
         plot_quad_position_desired(self.t[0:xq1.shape[1]], xq1[0:3, :], xq2[0:3, :], xq3[0:3, :], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
         plot_quad_velocity_desired(self.t[0:xq1.shape[1]], xq1[3:6, :], xq2[3:6, :], xq3[3:6, :], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
-
+        plot_angular_velocities_aux(self.t[0:rQ.shape[1]], rQ[0:3, :], rQ[3:6, :], rQ[6:9, :])
 def main(arg = None):
     rclpy.init(args=arg)
     payload_node = PayloadControlNode()

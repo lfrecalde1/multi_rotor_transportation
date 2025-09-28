@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'payload_dynamics = multi_rotor_transportation.main:main',
+            'payload_control = multi_rotor_transportation.main_acceleration:main',
         ],
     },
 )
