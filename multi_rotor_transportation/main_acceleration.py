@@ -19,8 +19,8 @@ class PayloadControlNode(Node):
         super().__init__('PayloadDynamics')
 
         # Time Definition
-        self.ts = 0.01
-        self.final = 20
+        self.ts = 0.03
+        self.final = 10
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Prediction Node of the NMPC formulation
@@ -34,7 +34,7 @@ class PayloadControlNode(Node):
         self.M_load = self.mass *  np.eye((3))
         self.inertia = np.array([[0.013344, 0.0, 0.0], [0.0, 0.012810, 0.0], [0.0, 0.0, 0.03064]], dtype=np.double)
         self.gravity = 9.81
-        self.alpha = 0.05
+        self.alpha = 0.03
 
         # Quadrotor paramaters
         self.mass_quad = 1.0
@@ -110,12 +110,11 @@ class PayloadControlNode(Node):
 
         # Init states
         self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init, self.r_init))
-        print(self.x_0)
+        print(self.x_0.shape)
 
         # Init Control Actions or equilibirum
         self.r_dot_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
         self.u_equilibrium = np.hstack((self.tensions_init, self.r_dot_init))
-        print(self.u_equilibrium)
 
         ## Maximum and minimun control actions
         tension_min = 0.5*self.tensions_init
@@ -134,47 +133,47 @@ class PayloadControlNode(Node):
         self.ocp = self.solver(self.x_0)
 
         ## Createn Model of the quadrotor
-        #quadrotor_position = self.quadrotor_position_c()
-        #quad_total_positions = np.array(quadrotor_position(self.x_0)).reshape((self.robot_num*3, ))
+        quadrotor_position = self.quadrotor_position_c()
+        quad_total_positions = np.array(quadrotor_position(self.x_0)).reshape((self.robot_num*3, ))
 
-        #self.quad_1_model, self.nx_quad, self.nu_quad = self.quadrotorModel(1)
-        #self.quad_2_model, _, _ = self.quadrotorModel(2)
-        #self.quad_3_model, _, _ = self.quadrotorModel(3)
+        self.quad_1_model, self.nx_quad, self.nu_quad = self.quadrotorModel(1)
+        self.quad_2_model, _, _ = self.quadrotorModel(2)
+        self.quad_3_model, _, _ = self.quadrotorModel(3)
 
         ## Create the initial states for quadrotor
-        #pos_quad_1 = np.array(quad_total_positions[0:3], dtype=np.double)
+        pos_quad_1 = np.array(quad_total_positions[0:3], dtype=np.double)
         ## Linear velocity of the sytem respect to the inertial frame
-        #vel_quad_1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        vel_quad_1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Angular velocity respect to the Body frame
-        #omega_quad_1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        omega_quad_1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Initial Orientation expressed as quaternionn
-        #quat_quad_1 = np.array([1.0, 0.0, 0.0, 0.0])
+        quat_quad_1 = np.array([1.0, 0.0, 0.0, 0.0])
 
-        #pos_quad_2 = np.array(quad_total_positions[3:6], dtype=np.double)
+        pos_quad_2 = np.array(quad_total_positions[3:6], dtype=np.double)
         ## Linear velocity of the sytem respect to the inertial frame
-        #vel_quad_2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        vel_quad_2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Angular velocity respect to the Body frame
-        #omega_quad_2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        omega_quad_2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Initial Orientation expressed as quaternionn
-        #quat_quad_2 = np.array([1.0, 0.0, 0.0, 0.0])
+        quat_quad_2 = np.array([1.0, 0.0, 0.0, 0.0])
 
-        #pos_quad_3 = np.array(quad_total_positions[6:9], dtype=np.double)
+        pos_quad_3 = np.array(quad_total_positions[6:9], dtype=np.double)
         ## Linear velocity of the sytem respect to the inertial frame
-        #vel_quad_3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        vel_quad_3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Angular velocity respect to the Body frame
-        #omega_quad_3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        omega_quad_3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ## Initial Orientation expressed as quaternionn
-        #quat_quad_3 = np.array([1.0, 0.0, 0.0, 0.0])
+        quat_quad_3 = np.array([1.0, 0.0, 0.0, 0.0])
 
-        #self.xq1_0 = np.hstack((pos_quad_1, vel_quad_1, quat_quad_1, omega_quad_1))
-        #self.xq2_0 = np.hstack((pos_quad_2, vel_quad_2, quat_quad_2, omega_quad_2))
-        #self.xq3_0 = np.hstack((pos_quad_3, vel_quad_3, quat_quad_3, omega_quad_3))
+        self.xq1_0 = np.hstack((pos_quad_1, vel_quad_1, quat_quad_1, omega_quad_1))
+        self.xq2_0 = np.hstack((pos_quad_2, vel_quad_2, quat_quad_2, omega_quad_2))
+        self.xq3_0 = np.hstack((pos_quad_3, vel_quad_3, quat_quad_3, omega_quad_3))
 
         ## Control Gains quadrotor
-        #self.K_p = np.array([[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]], dtype=np.double)
-        #self.K_v =  np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]], dtype=np.double)
-        #self.K_omega = np.array([[50.0, 0.0, 0.0], [0.0, 50.0, 0.0], [0.0, 0.0, 50.0]], dtype=np.double)
-        #self.K_orientation = np.array([[250.0, 0.0, 0.0], [0.0, 250.0, 0.0], [0.0, 0.0, 40.0]], dtype=np.double)
+        self.K_p = np.array([[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]], dtype=np.double)
+        self.K_v =  np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]], dtype=np.double)
+        self.K_omega = np.array([[50.0, 0.0, 0.0], [0.0, 50.0, 0.0], [0.0, 0.0, 50.0]], dtype=np.double)
+        self.K_orientation = np.array([[250.0, 0.0, 0.0], [0.0, 250.0, 0.0], [0.0, 0.0, 40.0]], dtype=np.double)
 
         ## OCP
         self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
@@ -477,7 +476,7 @@ class PayloadControlNode(Node):
         r3_cmd = ca.vertcat(rx_3_cmd, ry_3_cmd, rz_3_cmd) 
 
         # Vector of control actions
-        u = ca.vertcat(t_1_cmd, t_2_cmd, t_3_cmd, r1_cmd, r2_cmd, r3_cmd)
+        u = ca.vertcat(t_1_cmd, t_2_cmd, t_3_cmd, rx_1_cmd, ry_1_cmd, rz_1_cmd, rx_2_cmd, ry_2_cmd, rz_2_cmd, rx_3_cmd, ry_3_cmd, rz_3_cmd)
 
         # Rotation matrix
         Rot = self.quatTorot_c(quat)
@@ -499,9 +498,9 @@ class PayloadControlNode(Node):
         n2_dot = ca.cross(r2, n2)
         n3_dot = ca.cross(r3, n3)
 
-        r1_dot = (r1_cmd)
-        r2_dot = (r2_cmd)
-        r3_dot = (r3_cmd)
+        r1_dot = (r1_cmd - r1)/self.alpha
+        r2_dot = (r2_cmd - r2)/self.alpha
+        r3_dot = (r3_cmd - r3)/self.alpha
 
         # Explicit Dynamics
         f_expl = ca.vertcat(linear_velocity, linear_acceleration, quat_dt, omega_dot, n1_dot, n2_dot, n3_dot, r1_dot, r2_dot, r3_dot)
@@ -528,7 +527,6 @@ class PayloadControlNode(Node):
         nx = model.x.size()[0]
         nu = model.u.size()[0]
         ny = nx + nu
-        print(ny)
 
         # Set Dimension of the problem
         ocp.p = model.p
@@ -601,8 +599,8 @@ class PayloadControlNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 5*(r_error.T@r_error) + 10*(tension_error.T@tension_error)
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 5*(r_error.T@r_error) 
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 10*(r_error.T@r_error) + 10*(tension_error.T@tension_error)
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + 10*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -708,7 +706,7 @@ class PayloadControlNode(Node):
         return ro
     
     def quadrotor_position_c(self):
-        x = ca.MX.sym('x', 22, 1)
+        x = ca.MX.sym('x', 31, 1)
 
         x_p   = x[0:3]          # 3x1
         quat  = x[6:10]         # 4x1
@@ -743,20 +741,17 @@ class PayloadControlNode(Node):
         L = self.length
 
         # state & input
-        x = ca.MX.sym('x', 22, 1)
-        u = ca.MX.sym('u', 3 + 3*m, 1)  # general: 3 thrust comps + 3m 'r' comps
+        x = ca.MX.sym('x', 31, 1)
 
         # unpack state
-        x_p   = x[0:3]      # 3x1
-        v_p   = x[3:6]      # 3x1
-        quat  = x[6:10]     # 4x1
-        omega = x[10:13]    # 3x1
-        nflat = x[13:13+3*m]
+        x_p = x[0:3]
+        v_p = x[3:6]
+        quat = x[6:10]
+        omega = x[10:13]
+        nflat = x[13:22]
         n     = ca.reshape(nflat, 3, m)  # 3 x m
-
-        # unpack input
-        t = u[0:3]                  # optional thrust vector (unused here)
-        r = ca.reshape(u[3:], 3, m) # 3 x m (per-link angular velocities of n)
+        rflat = x[22:31]
+        r = ca.reshape(rflat, 3, m) # 3 x m (per-link angular velocities of n)
 
         # rotation
         R = self.quatTorot_c(quat)  # 3 x 3
@@ -770,7 +765,7 @@ class PayloadControlNode(Node):
             cols.append(v_k)
         quad_vel_mat = ca.hcat(cols)             # 3 x m
         quad_vel_vec = ca.reshape(quad_vel_mat, 3*m, 1)  # (3m) x 1
-        quad_velocity_f = ca.Function('quad_velocity_f', [x, u], [quad_vel_vec])
+        quad_velocity_f = ca.Function('quad_velocity_f', [x], [quad_vel_vec])
         return quad_velocity_f
 
     def cable_angular_velocity_c(self):
@@ -852,7 +847,7 @@ class PayloadControlNode(Node):
         publisher_payload_odom.publish(odom_payload_msg)
         return None 
 
-    def publish_transforms(self, payload):
+    def publish_transforms(self, payload, quad1, quad2, quad3):
         # Payload
 ## -------------------------------------------------------------------------------------------------------------------
         tf_world_load = TransformStamped()
@@ -868,41 +863,41 @@ class PayloadControlNode(Node):
         tf_world_load.transform.rotation.w = payload[6]
 
         # Quadrotor
-        #tf_world_quad1 = TransformStamped()
-        #tf_world_quad1.header.stamp = self.get_clock().now().to_msg()
-        #tf_world_quad1.header.frame_id = 'world'            # <-- world is the parent
-        #tf_world_quad1.child_frame_id = 'quad1'          # <-- imu_link is rotated
-        #tf_world_quad1.transform.translation.x = quad1[0]
-        #tf_world_quad1.transform.translation.y = quad1[1]
-        #tf_world_quad1.transform.translation.z = quad1[2]
-        #tf_world_quad1.transform.rotation.x = quad1[7]
-        #tf_world_quad1.transform.rotation.y = quad1[8]
-        #tf_world_quad1.transform.rotation.z = quad1[9]
-        #tf_world_quad1.transform.rotation.w = quad1[6]
+        tf_world_quad1 = TransformStamped()
+        tf_world_quad1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad1.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad1.child_frame_id = 'quad1'          # <-- imu_link is rotated
+        tf_world_quad1.transform.translation.x = quad1[0]
+        tf_world_quad1.transform.translation.y = quad1[1]
+        tf_world_quad1.transform.translation.z = quad1[2]
+        tf_world_quad1.transform.rotation.x = quad1[7]
+        tf_world_quad1.transform.rotation.y = quad1[8]
+        tf_world_quad1.transform.rotation.z = quad1[9]
+        tf_world_quad1.transform.rotation.w = quad1[6]
 
-        #tf_world_quad2 = TransformStamped()
-        #tf_world_quad2.header.stamp = self.get_clock().now().to_msg()
-        #tf_world_quad2.header.frame_id = 'world'            # <-- world is the parent
-        #tf_world_quad2.child_frame_id = 'quad2'          # <-- imu_link is rotated
-        #tf_world_quad2.transform.translation.x = quad2[0]
-        #tf_world_quad2.transform.translation.y = quad2[1]
-        #tf_world_quad2.transform.translation.z = quad2[2]
-        #tf_world_quad2.transform.rotation.x = quad2[7]
-        #tf_world_quad2.transform.rotation.y = quad2[8]
-        #tf_world_quad2.transform.rotation.z = quad2[9]
-        #tf_world_quad2.transform.rotation.w = quad2[6]
+        tf_world_quad2 = TransformStamped()
+        tf_world_quad2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad2.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad2.child_frame_id = 'quad2'          # <-- imu_link is rotated
+        tf_world_quad2.transform.translation.x = quad2[0]
+        tf_world_quad2.transform.translation.y = quad2[1]
+        tf_world_quad2.transform.translation.z = quad2[2]
+        tf_world_quad2.transform.rotation.x = quad2[7]
+        tf_world_quad2.transform.rotation.y = quad2[8]
+        tf_world_quad2.transform.rotation.z = quad2[9]
+        tf_world_quad2.transform.rotation.w = quad2[6]
 
-        #tf_world_quad3 = TransformStamped()
-        #tf_world_quad3.header.stamp = self.get_clock().now().to_msg()
-        #tf_world_quad3.header.frame_id = 'world'            # <-- world is the parent
-        #tf_world_quad3.child_frame_id = 'quad3'          # <-- imu_link is rotated
-        #tf_world_quad3.transform.translation.x = quad3[0]
-        #tf_world_quad3.transform.translation.y = quad3[1]
-        #tf_world_quad3.transform.translation.z = quad3[2]
-        #tf_world_quad3.transform.rotation.x = quad3[7]
-        #tf_world_quad3.transform.rotation.y = quad3[8]
-        #tf_world_quad3.transform.rotation.z = quad3[9]
-        #tf_world_quad3.transform.rotation.w = quad3[6]
+        tf_world_quad3 = TransformStamped()
+        tf_world_quad3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad3.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad3.child_frame_id = 'quad3'          # <-- imu_link is rotated
+        tf_world_quad3.transform.translation.x = quad3[0]
+        tf_world_quad3.transform.translation.y = quad3[1]
+        tf_world_quad3.transform.translation.z = quad3[2]
+        tf_world_quad3.transform.rotation.x = quad3[7]
+        tf_world_quad3.transform.rotation.y = quad3[8]
+        tf_world_quad3.transform.rotation.z = quad3[9]
+        tf_world_quad3.transform.rotation.w = quad3[6]
 ## --------------------------------------------------------------------------------------------------------------------
         ro = self.ro_w(payload)
         tf_payload_p1 = TransformStamped()
@@ -1010,7 +1005,7 @@ class PayloadControlNode(Node):
         tf_p3_q3.transform.translation.z = data_p3_q3[2]
 
         ## Broadcast both transforms
-        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3])
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_quad1, tf_world_quad2, tf_world_quad3])
         return None
 
     def validation(self):
@@ -1050,7 +1045,7 @@ class PayloadControlNode(Node):
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 0*np.pi/2
+        theta1 = 1*np.pi/2
         n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
@@ -1107,32 +1102,28 @@ class PayloadControlNode(Node):
         u[:, 0] = ud[:, 0]
 
         ## Create function to compute quadrotor position
-        #quadrotor_position = self.quadrotor_position_c()
-        #quadrotor_velocity = self.quadrotor_velocity_c()
-        #cable_angular_velocity = self.cable_angular_velocity_c()
+        quadrotor_position = self.quadrotor_position_c()
+        quadrotor_velocity = self.quadrotor_velocity_c()
 
         ## Positions and velocities from the planning
-        #xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
+        xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
 
-        #xQ_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #xQ_dot[:, 0] = np.array(quadrotor_velocity(x[:, 0], u[:, 0])).reshape((self.robot_num*3, ))
-
-        #rQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #rQ[:, 0] = np.array(cable_angular_velocity(x[:, 0], xQ_dot[:, 0])).reshape((self.robot_num*3, ))
+        xQ_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        xQ_dot[:, 0] = np.array(quadrotor_velocity(x[:, 0])).reshape((self.robot_num*3, ))
 
         ## Empty states for each quadrotor
-        #xq1 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #uq1 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
-        #xq1[:, 0] = self.xq1_0
+        xq1 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq1 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq1[:, 0] = self.xq1_0
 
-        #xq2 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #uq2 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
-        #xq2[:, 0] = self.xq2_0
+        xq2 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq2 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq2[:, 0] = self.xq2_0
 
-        #xq3 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
-        #uq3 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
-        #xq3[:, 0] = self.xq3_0
+        xq3 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        uq3 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
+        xq3[:, 0] = self.xq3_0
 
         ## Reset Solver
         self.acados_ocp_solver.reset()
@@ -1146,11 +1137,10 @@ class PayloadControlNode(Node):
         ## Simluation
         for k in range(0, self.t.shape[0] - self.N_prediction):
             tic = time.time()
-            print(x[:, k])
             # Send Odometry ros
             self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
             self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
-            self.publish_transforms(x[:, k])
+            self.publish_transforms(x[:, k], xq1[:, k], xq2[:, k], xq3[:, k])
 
             self.acados_ocp_solver.set(0, "lbx", x[:, k])
             self.acados_ocp_solver.set(0, "ubx", x[:, k])
@@ -1173,31 +1163,30 @@ class PayloadControlNode(Node):
 
             aux_control = self.acados_ocp_solver.get(0, "u")
             u[:, k] = aux_control
-            print(u[:, k])
 
         #    # Ccntrol of each quadrotor
-        #    uM_q1 = self.geometric_control(xq1[0:3, k], xQ[0:3, k], xq1[3:6, k], xQ_dot[0:3, k], np.zeros((3,)), xq1[6:10, k], 0.0,  xq1[10:13, k], np.zeros((3, )))
-        #    uM_q2 = self.geometric_control(xq2[0:3, k], xQ[3:6, k], xq2[3:6, k], xQ_dot[3:6, k], np.zeros((3,)), xq2[6:10, k], 0.0,  xq2[10:13, k], np.zeros((3, )))
-        #    uM_q3 = self.geometric_control(xq3[0:3, k], xQ[6:9, k], xq3[3:6, k], xQ_dot[6:9, k], np.zeros((3,)), xq3[6:10, k], 0.0,  xq3[10:13, k], np.zeros((3, )))
+            uM_q1 = self.geometric_control(xq1[0:3, k], xQ[0:3, k], xq1[3:6, k], xQ_dot[0:3, k], np.zeros((3,)), xq1[6:10, k], 0.0,  xq1[10:13, k], np.zeros((3, )))
+            uM_q2 = self.geometric_control(xq2[0:3, k], xQ[3:6, k], xq2[3:6, k], xQ_dot[3:6, k], np.zeros((3,)), xq2[6:10, k], 0.0,  xq2[10:13, k], np.zeros((3, )))
+            uM_q3 = self.geometric_control(xq3[0:3, k], xQ[6:9, k], xq3[3:6, k], xQ_dot[6:9, k], np.zeros((3,)), xq3[6:10, k], 0.0,  xq3[10:13, k], np.zeros((3, )))
 
         #    # Update Data of the system
             self.acados_integrator.set("x", x[:, k])
             self.acados_integrator.set("u", u[:, k])
 
-        #    status_integral = self.acados_integrator.solve()
+            status_integral = self.acados_integrator.solve()
             xcurrent = self.acados_integrator.get("x")
             x[:, k+1] = xcurrent
 
         #    # Update QUadrotors positions
-        #    xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
-        #    xQ_dot[:, k+1] = np.array(quadrotor_velocity(x[:, k+1], u[:,k])).reshape((self.robot_num*3, ))
+            xQ[:, k+1] = np.array(quadrotor_position(x[:, k+1])).reshape((self.robot_num*3, ))
+            xQ_dot[:, k+1] = np.array(quadrotor_velocity(x[:, k+1])).reshape((self.robot_num*3, ))
 
         #    rQ[:, k+1] = np.array(cable_angular_velocity(x[:, k+1], xQ_dot[:, k+1])).reshape((self.robot_num*3, ))
 
         #    # Update quadrotors
-        #    xq1[:, k+1] = np.array(self.quad_1_model(xq1[:, k], uM_q1, self.ts)).reshape((self.nx_quad, ))
-        #    xq2[:, k+1] = np.array(self.quad_1_model(xq2[:, k], uM_q2, self.ts)).reshape((self.nx_quad, ))
-        #    xq3[:, k+1] = np.array(self.quad_1_model(xq3[:, k], uM_q3, self.ts)).reshape((self.nx_quad, ))
+            xq1[:, k+1] = np.array(self.quad_1_model(xq1[:, k], uM_q1, self.ts)).reshape((self.nx_quad, ))
+            xq2[:, k+1] = np.array(self.quad_1_model(xq2[:, k], uM_q2, self.ts)).reshape((self.nx_quad, ))
+            xq3[:, k+1] = np.array(self.quad_1_model(xq3[:, k], uM_q3, self.ts)).reshape((self.nx_quad, ))
         #    
         #    # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
@@ -1208,12 +1197,12 @@ class PayloadControlNode(Node):
             self.get_logger().info("PAYLOAD CONTROL")
         #
         ## Plot the results 
-        #plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
-        #plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
-        #plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
-        #plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
-        #plot_quad_position_desired(self.t[0:xq1.shape[1]], xq1[0:3, :], xq2[0:3, :], xq3[0:3, :], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
-        #plot_quad_velocity_desired(self.t[0:xq1.shape[1]], xq1[3:6, :], xq2[3:6, :], xq3[3:6, :], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
+        plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
+        plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
+        plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
+        plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
+        plot_quad_position_desired(self.t[0:xq1.shape[1]], xq1[0:3, :], xq2[0:3, :], xq3[0:3, :], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
+        plot_quad_velocity_desired(self.t[0:xq1.shape[1]], xq1[3:6, :], xq2[3:6, :], xq3[3:6, :], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
         #plot_angular_velocities_aux(self.t[0:rQ.shape[1]], rQ[0:3, :], rQ[3:6, :], rQ[6:9, :])
 def main(arg = None):
     rclpy.init(args=arg)
