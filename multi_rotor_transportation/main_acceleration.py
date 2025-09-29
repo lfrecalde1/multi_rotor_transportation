@@ -20,7 +20,7 @@ class PayloadControlNode(Node):
 
         # Time Definition
         self.ts = 0.03
-        self.final = 10
+        self.final = 15
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Prediction Node of the NMPC formulation
@@ -45,7 +45,7 @@ class PayloadControlNode(Node):
         kp_min = (c1*(kv_min*kv_min) + 2*kv_min*c1 - c1*c1)/((self.mass)*(4*(kv_min - c1)-1))
         kp_min = 80
         self.kp_min = kp_min
-        self.kv_min = 49
+        self.kv_min = 50
         self.c1 = c1
         print(self.kp_min)
         print(self.kv_min)
@@ -645,7 +645,7 @@ class PayloadControlNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) + 10*(tension_error.T@tension_error) + 0.01*(r_dot_cmd.T@r_dot_cmd)
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) + 10*(tension_error.T@tension_error) + 2*(r_dot_cmd.T@r_dot_cmd)
         ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
@@ -752,6 +752,34 @@ class PayloadControlNode(Node):
             ro[:, k] = t + R_ql@self.p[:, k]
         return ro
     
+    def quadrotor_payload_unit_vector_c(self):
+        x = ca.MX.sym('x', self.n_x, 1)
+
+        x_p   = x[0:3]          # 3x1
+        quat  = x[6:10]         # 4x1
+        nflat = x[13:25]        # (3*m)x1   (assumes your state packs 3*m entries here)
+
+        P = ca.DM(self.p) if isinstance(self.p, np.ndarray) else self.p  # 3 x m
+        m = P.shape[1]
+        L = self.length
+
+        xq = ca.MX.sym('xq', 3*self.robot_num, 1)
+        xq_p = ca.reshape(xq, 3, m)
+
+        # rotation from quaternion
+        Rot = self.quatTorot_c(quat)  # 3 x 3
+
+        # Vectorized expression:
+        cols = []
+        for k in range(m):
+            term = x_p + Rot@P[:, k] - xq_p[:, k]
+            n_k      = L*(term/ca.norm_2(term))
+            cols.append(n_k)
+        quad_payload_mat = ca.hcat(cols)             # 3 x m
+        quad_payload_vec = ca.reshape(quad_payload_mat, 3*m, 1)  # (3m) x 1
+        quadrotor_payload_vector_f = ca.Function('quadrotor_payload_vector_f', [x, xq], [quad_payload_vec])
+        return quadrotor_payload_vector_f
+
     def quadrotor_position_c(self):
         x = ca.MX.sym('x', self.n_x, 1)
 
@@ -957,7 +985,7 @@ class PayloadControlNode(Node):
         publisher_payload_odom.publish(odom_payload_msg)
         return None 
 
-    def publish_transforms(self, payload, quad1, quad2, quad3, quad4):
+    def publish_transforms(self, payload, quad1, quad2, quad3, quad4, unit_vectors):
         # Payload
 ## -------------------------------------------------------------------------------------------------------------------
         tf_world_load = TransformStamped()
@@ -1159,8 +1187,45 @@ class PayloadControlNode(Node):
         tf_p4_q4.transform.translation.y = data_p4_q4[1]
         tf_p4_q4.transform.translation.z = data_p4_q4[2]
 
+        # Real Unit vector of the system
+        tf_p1_q1_real = TransformStamped()
+        tf_p1_q1_real.header.stamp = self.get_clock().now().to_msg()
+        tf_p1_q1_real.header.frame_id = 'p1_aux'
+        tf_p1_q1_real.child_frame_id = '                      quadrotor_1_real'
+        data_p1_q1_real = - unit_vectors[0:3]
+        tf_p1_q1_real.transform.translation.x = data_p1_q1_real[0]
+        tf_p1_q1_real.transform.translation.y = data_p1_q1_real[1]
+        tf_p1_q1_real.transform.translation.z = data_p1_q1_real[2]
+
+        tf_p2_q2_real = TransformStamped()
+        tf_p2_q2_real.header.stamp = self.get_clock().now().to_msg()
+        tf_p2_q2_real.header.frame_id = 'p2_aux'
+        tf_p2_q2_real.child_frame_id = '                      quadrotor_2_real'
+        data_p2_q2_real = - unit_vectors[3:6]
+        tf_p2_q2_real.transform.translation.x = data_p2_q2_real[0]
+        tf_p2_q2_real.transform.translation.y = data_p2_q2_real[1]
+        tf_p2_q2_real.transform.translation.z = data_p2_q2_real[2]
+
+        tf_p3_q3_real = TransformStamped()
+        tf_p3_q3_real.header.stamp = self.get_clock().now().to_msg()
+        tf_p3_q3_real.header.frame_id = 'p3_aux'
+        tf_p3_q3_real.child_frame_id = '                      quadrotor_3_real'
+        data_p3_q3_real = - unit_vectors[6:9]
+        tf_p3_q3_real.transform.translation.x = data_p3_q3_real[0]
+        tf_p3_q3_real.transform.translation.y = data_p3_q3_real[1]
+        tf_p3_q3_real.transform.translation.z = data_p3_q3_real[2]
+
+        tf_p4_q4_real = TransformStamped()
+        tf_p4_q4_real.header.stamp = self.get_clock().now().to_msg()
+        tf_p4_q4_real.header.frame_id = 'p4_aux'
+        tf_p4_q4_real.child_frame_id = '                      quadrotor_4_real'
+        data_p4_q4_real = - unit_vectors[9:12]
+        tf_p4_q4_real.transform.translation.x = data_p4_q4_real[0]
+        tf_p4_q4_real.transform.translation.y = data_p4_q4_real[1]
+        tf_p4_q4_real.transform.translation.z = data_p4_q4_real[2]
+
         ## Broadcast both transforms
-        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_p4_q4, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_p4, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_q4, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4])
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_p4_q4, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_p4, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_q4, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_p1_q1_real, tf_p2_q2_real, tf_p3_q3_real, tf_p4_q4_real])
         return None
 
     def validation(self):
@@ -1192,9 +1257,9 @@ class PayloadControlNode(Node):
         ud = np.zeros((self.n_u, self.t.shape[0]), dtype=np.double)
 
         ### Set desired states
-        xd[0, :] = 3
-        xd[1, :] = 3
-        xd[2, :] = 3
+        xd[0, :] = 2
+        xd[1, :] = 2
+        xd[2, :] = 2
 
         xd[3, :] = 0.0
         xd[4, :] = 0.0
@@ -1273,6 +1338,7 @@ class PayloadControlNode(Node):
         quadrotor_position = self.quadrotor_position_c()
         quadrotor_velocity = self.quadrotor_velocity_c()
         quadrotor_acceleration = self.quadrotor_acceleration_c()
+        unit_vector_from_measurements = self.quadrotor_payload_unit_vector_c()
         ### Positions and velocities from the planning
         xQ = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ[:, 0] = np.array(quadrotor_position(x[:, 0])).reshape((self.robot_num*3, ))
@@ -1282,6 +1348,7 @@ class PayloadControlNode(Node):
 
         xQ_dot_dot = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
         xQ_dot_dot[:, 0] = np.array(quadrotor_acceleration(x[:, 0], u[:, 0])).reshape((self.robot_num*3, ))
+
 
         ### Empty states for each quadrotor
         xq1 = np.zeros((self.nx_quad, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
@@ -1300,6 +1367,10 @@ class PayloadControlNode(Node):
         uq4 = np.zeros((self.nu_quad, self.t.shape[0] - self.N_prediction), dtype=np.double)
         xq4[:, 0] = self.xq4_0
 
+        unit = np.zeros((self.robot_num*3, self.t.shape[0] + 1 - self.N_prediction), dtype=np.double)
+        xquadrotors = np.hstack((xq1[0:3, 0], xq2[0:3, 0], xq3[0:3, 0], xq4[0:3, 0])) 
+        unit[:, 0] = np.array(unit_vector_from_measurements(x[:, 0], xquadrotors)).reshape((self.robot_num*3, ))
+
         ### Reset Solver
         self.acados_ocp_solver.reset()
 
@@ -1315,7 +1386,7 @@ class PayloadControlNode(Node):
             # Send Odometry ros
             self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
             self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
-            self.publish_transforms(x[:, k], xq1[:, k], xq2[:, k], xq3[:, k], xq4[:, k])
+            self.publish_transforms(x[:, k], xq1[:, k], xq2[:, k], xq3[:, k], xq4[:, k], unit[:, k])
 
             self.acados_ocp_solver.set(0, "lbx", x[:, k])
             self.acados_ocp_solver.set(0, "ubx", x[:, k])
@@ -1369,6 +1440,9 @@ class PayloadControlNode(Node):
             xq2[:, k+1] = np.array(self.quad_1_model(xq2[:, k], uM_q2, u_ext_2, self.ts)).reshape((self.nx_quad, ))
             xq3[:, k+1] = np.array(self.quad_1_model(xq3[:, k], uM_q3, u_ext_3, self.ts)).reshape((self.nx_quad, ))
             xq4[:, k+1] = np.array(self.quad_1_model(xq4[:, k], uM_q4, u_ext_4, self.ts)).reshape((self.nx_quad, ))
+
+            xquadrotors = np.hstack((xq1[0:3, k+1], xq2[0:3, k+1], xq3[0:3, k+1], xq4[0:3, k+1])) 
+            unit[:, k + 1] = np.array(unit_vector_from_measurements(x[:, k+1], xquadrotors)).reshape((self.robot_num*3, ))
             
             # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
