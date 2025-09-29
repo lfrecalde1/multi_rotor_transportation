@@ -75,7 +75,7 @@ class PayloadControlNode(Node):
         self.p4 = np.array([0.35, -0.35, 0.0], dtype=np.double)
 
         self.p = np.vstack((self.p1, self.p2, self.p3, self.p4)).T
-        self.length = 1.5
+        self.length = 1.0
         self.e3 = ca.DM([0, 0, 1])
 
         # Payload odometry
@@ -88,7 +88,7 @@ class PayloadControlNode(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Position of the system
-        pos_0 = np.array([0.0, 0.0, 0.5], dtype=np.double)
+        pos_0 = np.array([0.0, 0.0, 0.2], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
         vel_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Angular velocity respect to the Body frame
@@ -645,8 +645,8 @@ class PayloadControlNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) + 10*(tension_error.T@tension_error) + 2*(r_dot_cmd.T@r_dot_cmd)
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) 
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 0.1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 0.01*(r_dot_cmd.T@r_dot_cmd)
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 0.1*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -1257,9 +1257,9 @@ class PayloadControlNode(Node):
         ud = np.zeros((self.n_u, self.t.shape[0]), dtype=np.double)
 
         ### Set desired states
-        xd[0, :] = 2
-        xd[1, :] = 2
-        xd[2, :] = 2
+        xd[0, :] = 0.5
+        xd[1, :] = 0.5
+        xd[2, :] = 0.5
 
         xd[3, :] = 0.0
         xd[4, :] = 0.0
@@ -1453,12 +1453,12 @@ class PayloadControlNode(Node):
             self.get_logger().info("PAYLOAD CONTROL")
         
         ### Plot the results 
-        #plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
-        #plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
-        #plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
-        #plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
-        #plot_quad_position_desired(self.t[0:xq1.shape[1]], xq1[0:3, :], xq2[0:3, :], xq3[0:3, :], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
-        #plot_quad_velocity_desired(self.t[0:xq1.shape[1]], xq1[3:6, :], xq2[3:6, :], xq3[3:6, :], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
+        plot_tensions(self.t[0:u.shape[1]], u[0:3, :])
+        plot_angular_velocities(self.t[0:u.shape[1]], u[3:6, :], u[6:9, :], u[9:12, :])
+        plot_quad_position(self.t[0:xQ.shape[1]], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
+        plot_quad_velocity(self.t[0:xQ_dot.shape[1]], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
+        plot_quad_position_desired(self.t[0:xq1.shape[1]], xq1[0:3, :], xq2[0:3, :], xq3[0:3, :], xQ[0:3, :], xQ[3:6, :], xQ[6:9, :])
+        plot_quad_velocity_desired(self.t[0:xq1.shape[1]], xq1[3:6, :], xq2[3:6, :], xq3[3:6, :], xQ_dot[0:3, :], xQ_dot[3:6, :], xQ_dot[6:9, :])
         #plot_angular_velocities_aux(self.t[0:rQ.shape[1]], rQ[0:3, :], rQ[3:6, :], rQ[6:9, :])
 def main(arg = None):
     rclpy.init(args=arg)
