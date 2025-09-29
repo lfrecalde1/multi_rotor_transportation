@@ -119,7 +119,7 @@ class PayloadControlNode(Node):
 
         ### Maximum and minimun control actions
         tension_min = 0.5*self.tensions_init
-        tension_max = 2.5*self.tensions_init
+        tension_max = 4.5*self.tensions_init
         r_dot_max = np.array([2.0, 2.0, 2.0]*self.robot_num, dtype=np.double)
         r_dot_min = -r_dot_max
         self.u_min =  np.hstack((tension_min, r_dot_min))
