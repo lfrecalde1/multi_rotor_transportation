@@ -71,7 +71,7 @@ class PayloadControlMujocoNode(Node):
         self.p4 = np.array([0.3, 0.2, 0.0], dtype=np.double)
 
         self.p = np.vstack((self.p1, self.p2, self.p3, self.p4)).T
-        self.length = 1.0
+        self.length = 1.0 + 0.015
         self.e3 = ca.DM([0, 0, 1])
 
         # Position of the system we shoudl update this by the quadrotor initial positions
@@ -1142,7 +1142,81 @@ class PayloadControlMujocoNode(Node):
         tf_payload_p4.transform.translation.y = self.p4[1]
         tf_payload_p4.transform.translation.z = self.p4[2]
 
-        self.tf_broadcaster.sendTransform([tf_world_load, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4])
+        ## ------------------------------------------------------------- AUX TF------------------------------- 
+        tf_world_p1 = TransformStamped()
+        tf_world_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p1.header.frame_id = 'world'
+        tf_world_p1.child_frame_id = 'p_0_aux'
+        tf_world_p1.transform.translation.x = ro[0, 0]
+        tf_world_p1.transform.translation.y = ro[1, 0]
+        tf_world_p1.transform.translation.z = ro[2, 0]
+
+        tf_world_p2 = TransformStamped()
+        tf_world_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p2.header.frame_id = 'world'
+        tf_world_p2.child_frame_id = 'p_1_aux'
+        tf_world_p2.transform.translation.x = ro[0, 1]
+        tf_world_p2.transform.translation.y = ro[1, 1]
+        tf_world_p2.transform.translation.z = ro[2, 1]
+
+        tf_world_p3 = TransformStamped()
+        tf_world_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p3.header.frame_id = 'world'
+        tf_world_p3.child_frame_id = 'p_2_aux'
+        tf_world_p3.transform.translation.x = ro[0, 2]
+        tf_world_p3.transform.translation.y = ro[1, 2]
+        tf_world_p3.transform.translation.z = ro[2, 2]
+
+        tf_world_p4 = TransformStamped()
+        tf_world_p4.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p4.header.frame_id = 'world'
+        tf_world_p4.child_frame_id = 'p_3_aux'
+        tf_world_p4.transform.translation.x = ro[0, 3]
+        tf_world_p4.transform.translation.y = ro[1, 3]
+        tf_world_p4.transform.translation.z = ro[2, 3]
+
+        
+        # Extract Direction Only to check Values
+        n = self.x_0[13:25]
+        tension = n.reshape((3, self.p.shape[1]), order='F')
+
+        tf_p1_q1 = TransformStamped()
+        tf_p1_q1.header.stamp = self.get_clock().now().to_msg()
+        tf_p1_q1.header.frame_id = 'p_0_aux'
+        tf_p1_q1.child_frame_id = 'quadrotor_0'
+        data_p1_q1 = -(tension[:, 0])*self.length
+        tf_p1_q1.transform.translation.x = data_p1_q1[0]
+        tf_p1_q1.transform.translation.y = data_p1_q1[1]
+        tf_p1_q1.transform.translation.z = data_p1_q1[2]
+
+        tf_p2_q2 = TransformStamped()
+        tf_p2_q2.header.stamp = self.get_clock().now().to_msg()
+        tf_p2_q2.header.frame_id = 'p_1_aux'
+        tf_p2_q2.child_frame_id = 'quadrotor_1'
+        data_p2_q2 = -(tension[:, 1])*self.length
+        tf_p2_q2.transform.translation.x = data_p2_q2[0]
+        tf_p2_q2.transform.translation.y = data_p2_q2[1]
+        tf_p2_q2.transform.translation.z = data_p2_q2[2]
+
+        tf_p3_q3 = TransformStamped()
+        tf_p3_q3.header.stamp = self.get_clock().now().to_msg()
+        tf_p3_q3.header.frame_id = 'p_2_aux'
+        tf_p3_q3.child_frame_id = 'quadrotor_2'
+        data_p3_q3 = -(tension[:, 2])*self.length
+        tf_p3_q3.transform.translation.x = data_p3_q3[0]
+        tf_p3_q3.transform.translation.y = data_p3_q3[1]
+        tf_p3_q3.transform.translation.z = data_p3_q3[2]
+
+        tf_p4_q4 = TransformStamped()
+        tf_p4_q4.header.stamp = self.get_clock().now().to_msg()
+        tf_p4_q4.header.frame_id = 'p_3_aux'
+        tf_p4_q4.child_frame_id = 'quadrotor_3'
+        data_p4_q4 = -(tension[:, 3])*self.length
+        tf_p4_q4.transform.translation.x = data_p4_q4[0]
+        tf_p4_q4.transform.translation.y = data_p4_q4[1]
+        tf_p4_q4.transform.translation.z = data_p4_q4[2]
+
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_p4, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_p4_q4])
         return None
     def run(self):
 
