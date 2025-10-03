@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'payload_dynamics = multi_rotor_transportation.main:main',
             'payload_control = multi_rotor_transportation.main_acceleration:main',
+            'payload_control_mujoco = multi_rotor_transportation.main_mujoco:main',
         ],
     },
 )
