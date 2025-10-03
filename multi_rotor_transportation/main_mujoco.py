@@ -10,6 +10,8 @@ from scipy.spatial.transform import Rotation as R
 import time
 from acados_template import AcadosModel
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
 
 
 class PayloadControlMujocoNode(Node):
@@ -63,10 +65,10 @@ class PayloadControlMujocoNode(Node):
 
 
         # Load shape parameters triangle
-        self.p1 = np.array([0.35, 0.35, 0.0], dtype=np.double)
-        self.p2 = np.array([-0.35, 0.35, 0.0], dtype=np.double)
-        self.p3 = np.array([-0.35, -0.35, 0.0], dtype=np.double)
-        self.p4 = np.array([0.35, -0.35, 0.0], dtype=np.double)
+        self.p1 = np.array([-0.3, -0.2, 0.0], dtype=np.double)
+        self.p2 = np.array([-0.3, 0.2, 0.0], dtype=np.double)
+        self.p3 = np.array([0.3, -0.2, 0.0], dtype=np.double)
+        self.p4 = np.array([0.3, 0.2, 0.0], dtype=np.double)
 
         self.p = np.vstack((self.p1, self.p2, self.p3, self.p4)).T
         self.length = 1.0
@@ -129,6 +131,9 @@ class PayloadControlMujocoNode(Node):
         self.publisher_ref_drone_2 = self.create_publisher(PositionCommand, "/drone_2/position_cmd", 10)
         self.publisher_ref_drone_3 = self.create_publisher(PositionCommand, "/drone_3/position_cmd", 10)
 
+        # TF
+        self.tf_broadcaster = TransformBroadcaster(self)
+
          ### Create the initial states for quadrotor
         pos_quad_0 = np.array([0.06, 0.07, 1.8], dtype=np.double)
         ### Linear velocity of the sytem respect to the inertial frame
@@ -166,6 +171,8 @@ class PayloadControlMujocoNode(Node):
         self.xq1_0 = np.hstack((pos_quad_1, vel_quad_1, quat_quad_1, omega_quad_1))
         self.xq2_0 = np.hstack((pos_quad_2, vel_quad_2, quat_quad_2, omega_quad_2))
         self.xq3_0 = np.hstack((pos_quad_3, vel_quad_3, quat_quad_3, omega_quad_3))
+
+        self.unit_vector_from_measurements = self.quadrotor_payload_unit_vector_c()
 
         self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
         self.start_time = time.time()
@@ -208,6 +215,11 @@ class PayloadControlMujocoNode(Node):
         x[3] = vx_i[0, 0]
         x[4] = vx_i[1, 0]
         x[5] = vx_i[2, 0]
+
+        xquadrotors = np.hstack((self.xq0_0[0:3], self.xq1_0[0:3], self.xq2_0[0:3], self.xq3_0[0:3])) 
+        unit = np.array(self.unit_vector_from_measurements(x, xquadrotors)).reshape((self.robot_num*3, ))
+        payload_states = np.hstack((x, unit))
+        self.x_0 = payload_states
         return None
 
     def callback_get_odometry_drone_0(self, msg):
@@ -784,11 +796,10 @@ class PayloadControlMujocoNode(Node):
         return ro
     
     def quadrotor_payload_unit_vector_c(self):
-        x = ca.MX.sym('x', self.n_x, 1)
+        x = ca.MX.sym('x', 13, 1)
 
         x_p   = x[0:3]          # 3x1
         quat  = x[6:10]         # 4x1
-        nflat = x[13:25]        # (3*m)x1   (assumes your state packs 3*m entries here)
 
         P = ca.DM(self.p) if isinstance(self.p, np.ndarray) else self.p  # 3 x m
         m = P.shape[1]
@@ -1033,21 +1044,121 @@ class PayloadControlMujocoNode(Node):
         publisher.publish(position_cmd_msg)
         return None 
 
+    def publish_transforms(self):
+        # Payload
+## -------------------------------------------------------------------------------------------------------------------
+        tf_world_load = TransformStamped()
+        tf_world_load.header.stamp = self.get_clock().now().to_msg()
+        tf_world_load.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_load.child_frame_id = 'payload'          # <-- imu_link is rotated
+        tf_world_load.transform.translation.x = self.x_0[0]
+        tf_world_load.transform.translation.y = self.x_0[1]
+        tf_world_load.transform.translation.z = self.x_0[2]
+        tf_world_load.transform.rotation.x = self.x_0[7]
+        tf_world_load.transform.rotation.y = self.x_0[8]
+        tf_world_load.transform.rotation.z = self.x_0[9]
+        tf_world_load.transform.rotation.w = self.x_0[6]
+
+        # Quadrotor
+        tf_world_quad1 = TransformStamped()
+        tf_world_quad1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad1.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad1.child_frame_id = 'drone_0'          # <-- imu_link is rotated
+        tf_world_quad1.transform.translation.x = self.xq0_0[0]
+        tf_world_quad1.transform.translation.y = self.xq0_0[1]
+        tf_world_quad1.transform.translation.z = self.xq0_0[2]
+        tf_world_quad1.transform.rotation.x = self.xq0_0[7]
+        tf_world_quad1.transform.rotation.y = self.xq0_0[8]
+        tf_world_quad1.transform.rotation.z = self.xq0_0[9]
+        tf_world_quad1.transform.rotation.w = self.xq0_0[6]
+
+        tf_world_quad2 = TransformStamped()
+        tf_world_quad2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad2.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad2.child_frame_id = 'drone_1'          # <-- imu_link is rotated
+        tf_world_quad2.transform.translation.x = self.xq1_0[0]
+        tf_world_quad2.transform.translation.y = self.xq1_0[1]
+        tf_world_quad2.transform.translation.z = self.xq1_0[2]
+        tf_world_quad2.transform.rotation.x = self.xq1_0[7]
+        tf_world_quad2.transform.rotation.y = self.xq1_0[8]
+        tf_world_quad2.transform.rotation.z = self.xq1_0[9]
+        tf_world_quad2.transform.rotation.w = self.xq1_0[6]
+
+        tf_world_quad3 = TransformStamped()
+        tf_world_quad3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad3.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad3.child_frame_id = 'drone_2'          # <-- imu_link is rotated
+        tf_world_quad3.transform.translation.x = self.xq2_0[0]
+        tf_world_quad3.transform.translation.y = self.xq2_0[1]
+        tf_world_quad3.transform.translation.z = self.xq2_0[2]
+        tf_world_quad3.transform.rotation.x = self.xq2_0[7]
+        tf_world_quad3.transform.rotation.y = self.xq2_0[8]
+        tf_world_quad3.transform.rotation.z = self.xq2_0[9]
+        tf_world_quad3.transform.rotation.w = self.xq2_0[6]
+        
+        tf_world_quad4 = TransformStamped()
+        tf_world_quad4.header.stamp = self.get_clock().now().to_msg()
+        tf_world_quad4.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_quad4.child_frame_id = 'drone_3'          # <-- imu_link is rotated
+        tf_world_quad4.transform.translation.x = self.xq3_0[0]
+        tf_world_quad4.transform.translation.y = self.xq3_0[1]
+        tf_world_quad4.transform.translation.z = self.xq3_0[2]
+        tf_world_quad4.transform.rotation.x = self.xq3_0[7]
+        tf_world_quad4.transform.rotation.y = self.xq3_0[8]
+        tf_world_quad4.transform.rotation.z = self.xq3_0[9]
+        tf_world_quad4.transform.rotation.w = self.xq3_0[6]
+
+        
+        ro = self.ro_w(self.x_0)
+        tf_payload_p1 = TransformStamped()
+        tf_payload_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p1.header.frame_id = 'payload'
+        tf_payload_p1.child_frame_id = 'p_0'
+        tf_payload_p1.transform.translation.x = self.p1[0]
+        tf_payload_p1.transform.translation.y = self.p1[1]
+        tf_payload_p1.transform.translation.z = self.p1[2]
+
+        tf_payload_p2 = TransformStamped()
+        tf_payload_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p2.header.frame_id = 'payload'
+        tf_payload_p2.child_frame_id = 'p_1'
+        tf_payload_p2.transform.translation.x = self.p2[0]
+        tf_payload_p2.transform.translation.y = self.p2[1]
+        tf_payload_p2.transform.translation.z = self.p2[2]
+
+        tf_payload_p3 = TransformStamped()
+        tf_payload_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p3.header.frame_id = 'payload'
+        tf_payload_p3.child_frame_id = 'p_2'
+        tf_payload_p3.transform.translation.x = self.p3[0]
+        tf_payload_p3.transform.translation.y = self.p3[1]
+        tf_payload_p3.transform.translation.z = self.p3[2]
+
+        tf_payload_p4 = TransformStamped()
+        tf_payload_p4.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p4.header.frame_id = 'payload'
+        tf_payload_p4.child_frame_id = 'p_3'
+        tf_payload_p4.transform.translation.x = self.p4[0]
+        tf_payload_p4.transform.translation.y = self.p4[1]
+        tf_payload_p4.transform.translation.z = self.p4[2]
+
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4])
+        return None
     def run(self):
 
-        xd_q0 = np.array([0.0, -0.8, 2.0], dtype=np.double)
+        xd_q0 = np.array([0.0, -2.5, 2.0], dtype=np.double)
         vd_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q1 = np.array([0.0, 1.5, 2.0], dtype=np.double)
+        xd_q1 = np.array([0.0, -1.5, 2.0], dtype=np.double)
         vd_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q2 = np.array([1.0, -0.8, 2.0], dtype=np.double)
+        xd_q2 = np.array([1.0, -2.5, 2.0], dtype=np.double)
         vd_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q3 = np.array([1.13, 1.5, 2.0], dtype=np.double)
+        xd_q3 = np.array([1.13, -1.5, 2.0], dtype=np.double)
         vd_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
@@ -1055,7 +1166,7 @@ class PayloadControlMujocoNode(Node):
         self.send_position_cmd(self.publisher_ref_drone_1, xd_q1, vd_q1, ad_q1)
         self.send_position_cmd(self.publisher_ref_drone_2, xd_q2, vd_q2, ad_q2)
         self.send_position_cmd(self.publisher_ref_drone_3, xd_q3, vd_q3, ad_q3)
-        return None
+        self.publish_transforms()
 
 def main(arg = None):
     rclpy.init(args=arg)
