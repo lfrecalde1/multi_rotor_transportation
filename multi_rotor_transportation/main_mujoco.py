@@ -190,9 +190,9 @@ class PayloadControlMujocoNode(Node):
         self.xd = np.zeros((self.n_x, ), dtype=np.double)
         self.ud = np.zeros((self.n_u, ), dtype=np.double)
 
-        self.xd[0] = 0.5
-        self.xd[1] = 0.5
-        self.xd[2] = 0.5
+        self.xd[0] = 0.7
+        self.xd[1] = 0.8
+        self.xd[2] = 2.0
 
         self.xd[3] = 0.0
         self.xd[4] = 0.0
@@ -827,8 +827,8 @@ class PayloadControlMujocoNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 1*(r_dot_cmd.T@r_dot_cmd)
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) 
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + 0.0*(error_n1.T@error_n1) + 0.0*(error_n2.T@error_n2) + 0.0*(error_n3.T@error_n3) + 0.0*(error_n4.T@error_n4) + 1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 1*(r_dot_cmd.T@r_dot_cmd)
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + 0.0*(error_n1.T@error_n1) + 0.0*(error_n2.T@error_n2) + 0.0*(error_n3.T@error_n3) + 0.0*(error_n4.T@error_n4) + 1*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -1316,29 +1316,42 @@ class PayloadControlMujocoNode(Node):
 
         self.tf_broadcaster.sendTransform([tf_world_load, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_p4, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_p4_q4])
         return None
-
     def publish_prediction(self):
-        path_msgs = Path()
-        path_msgs.header.stamp = self.get_clock().now().to_msg()
-        path_msgs.header.frame_id = "world"
-        poses = []
+        # Create one Path message per drone
+        path_msgs = []
+        for i in range(self.robot_num):
+            msg = Path()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "world"
+            path_msgs.append(msg)
 
-        for k in range(0, self.N_prediction):
+        # Fill poses for each drone
+        for k in range(self.N_prediction):
             x_k = self.acados_ocp_solver.get(k, "x")
-            xq = np.array(self.quadrotor_position(x_k)).reshape((self.robot_num*3, ))
-            pose = PoseStamped()
-            pose.header = path_msgs.header  # inherit timestamp & frame
-            pose.pose.position.x = xq[0]
-            pose.pose.position.y = xq[1]
-            pose.pose.position.z = xq[2]
-            poses.append(pose)
-            #arr_str = np.array2string(
-            #x_k, precision=3, separator=", ", suppress_small=True)
-            #self.get_logger().info(f"pred[] = {arr_str}")
-        path_msgs.poses = poses
-        self.publisher_prediction_drone_0.publish(path_msgs)
-        return None
+            xq = np.array(self.quadrotor_position(x_k)).reshape((self.robot_num * 3,))
 
+            for i in range(self.robot_num):
+                pose = PoseStamped()
+                pose.header = path_msgs[i].header
+                pose.pose.position.x = xq[3*i + 0]
+                pose.pose.position.y = xq[3*i + 1]
+                pose.pose.position.z = xq[3*i + 2]
+                path_msgs[i].poses.append(pose)
+
+        # Publish each drone’s path
+        self.publisher_prediction_drone_0.publish(path_msgs[0])
+        self.publisher_prediction_drone_1.publish(path_msgs[1])
+        self.publisher_prediction_drone_2.publish(path_msgs[2])
+        self.publisher_prediction_drone_3.publish(path_msgs[3])
+
+    def geometric_control(self, xd, vd, ad, t, n):
+        # Control Error
+        aux_variable = ad 
+
+        ad = (aux_variable - t*n)
+
+        return xd, vd, ad
+    
     def prepare(self):
         if self.flag == 0:
             self.flag = 1
@@ -1382,33 +1395,25 @@ class PayloadControlMujocoNode(Node):
         self.acados_ocp_solver.solve()
 
         # get Control Actions and predictions
-        control = self.acados_ocp_solver.get(0, "u")
+        u = self.acados_ocp_solver.get(0, "u")
         x_k = self.acados_ocp_solver.get(1, "x")
 
         # Send Desired States Quadrotor
         self.publish_prediction()
 
-        # Solve MPC
-        xd_q0 = np.array([0.0, -1.0, 2.0], dtype=np.double)
-        vd_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-        ad_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        xQ = np.array(self.quadrotor_position(x_k)).reshape((self.robot_num*3, ))
+        xQ_dot = np.array(self.quadrotor_velocity(x_k)).reshape((self.robot_num*3, ))
+        xQ_dot_dot = np.array(self.quadrotor_acceleration(x_k, u)).reshape((self.robot_num*3, ))
 
-        xd_q1 = np.array([0.0, 0.0, 2.0], dtype=np.double)
-        vd_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-        ad_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        xd_q0, vd_q0, ad_q0 = self.geometric_control(xQ[0:3], xQ_dot[0:3], xQ_dot_dot[0:3], u[0], x_k[13:16])
+        xd_q1, vd_q1, ad_q1 = self.geometric_control(xQ[3:6], xQ_dot[3:6], xQ_dot_dot[3:6], u[1], x_k[16:19])
+        xd_q2, vd_q2, ad_q2 = self.geometric_control(xQ[6:9], xQ_dot[6:9], xQ_dot_dot[6:9], u[2], x_k[19:22])
+        xd_q3, vd_q3, ad_q3 = self.geometric_control(xQ[9:12], xQ_dot[9:12], xQ_dot_dot[9:12], u[3], x_k[22:25])
 
-        xd_q2 = np.array([1.0, -1.0, 2.0], dtype=np.double)
-        vd_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-        ad_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-
-        xd_q3 = np.array([1.13, 0.0, 2.0], dtype=np.double)
-        vd_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-        ad_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
-
-        #self.send_position_cmd(self.publisher_ref_drone_0, xd_q0, vd_q0, ad_q0)
-        #self.send_position_cmd(self.publisher_ref_drone_1, xd_q1, vd_q1, ad_q1)
-        #self.send_position_cmd(self.publisher_ref_drone_2, xd_q2, vd_q2, ad_q2)
-        #self.send_position_cmd(self.publisher_ref_drone_3, xd_q3, vd_q3, ad_q3)
+        self.send_position_cmd(self.publisher_ref_drone_0, xd_q0, vd_q0, ad_q0)
+        self.send_position_cmd(self.publisher_ref_drone_1, xd_q1, vd_q1, ad_q1)
+        self.send_position_cmd(self.publisher_ref_drone_2, xd_q2, vd_q2, ad_q2)
+        self.send_position_cmd(self.publisher_ref_drone_3, xd_q3, vd_q3, ad_q3)
         self.publish_transforms()
 
 def main(arg = None):
