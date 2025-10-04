@@ -5,6 +5,8 @@ import numpy as np
 import casadi as ca
 from casadi import Function
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
 from quadrotor_msgs.msg import PositionCommand
 from scipy.spatial.transform import Rotation as R
 import time
@@ -24,7 +26,7 @@ class PayloadControlMujocoNode(Node):
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Prediction Node of the NMPC formulation
-        self.t_N = 0.5
+        self.t_N = 1.0
         self.N = np.arange(0, self.t_N + self.ts, self.ts)
         self.N_prediction = self.N.shape[0]
 
@@ -32,7 +34,7 @@ class PayloadControlMujocoNode(Node):
         self.robot_num = 4
         self.mass = 1.5
         self.M_load = self.mass *  np.eye((3))
-        self.inertia = np.array([[0.013344, 0.0, 0.0], [0.0, 0.012810, 0.0], [0.0, 0.0, 0.03064]], dtype=np.double)
+        self.inertia = np.array([[0.02125, 0.0, 0.0], [0.0, 0.04625, 0.0], [0.0, 0.0, 0.065]], dtype=np.double)
         self.gravity = 9.81
 
         # Control gains
@@ -71,7 +73,7 @@ class PayloadControlMujocoNode(Node):
         self.p4 = np.array([0.3, 0.2, 0.0], dtype=np.double)
 
         self.p = np.vstack((self.p1, self.p2, self.p3, self.p4)).T
-        self.length = 1.0 + 0.015
+        self.length = 1.0
         self.e3 = ca.DM([0, 0, 1])
 
         # Position of the system we shoudl update this by the quadrotor initial positions
@@ -97,7 +99,7 @@ class PayloadControlMujocoNode(Node):
         self.r_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
 
         ## Init states
-        self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init))
+        self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, self.n_init, self.r_init))
 
         ## Init Control Actions or equilibirum
         self.r_dot_init = np.array([0.0, 0.0, 0.0]*self.robot_num, dtype=np.double)
@@ -130,6 +132,11 @@ class PayloadControlMujocoNode(Node):
         self.publisher_ref_drone_1 = self.create_publisher(PositionCommand, "/drone_1/position_cmd", 10)
         self.publisher_ref_drone_2 = self.create_publisher(PositionCommand, "/drone_2/position_cmd", 10)
         self.publisher_ref_drone_3 = self.create_publisher(PositionCommand, "/drone_3/position_cmd", 10)
+
+        self.publisher_prediction_drone_0 = self.create_publisher(Path, "/drone_0/predicted_path", 10)
+        self.publisher_prediction_drone_1 = self.create_publisher(Path, "/drone_1/predicted_path", 10)
+        self.publisher_prediction_drone_2 = self.create_publisher(Path, "/drone_2/predicted_path", 10)
+        self.publisher_prediction_drone_3 = self.create_publisher(Path, "/drone_3/predicted_path", 10)
 
         # TF
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -173,7 +180,86 @@ class PayloadControlMujocoNode(Node):
         self.xq3_0 = np.hstack((pos_quad_3, vel_quad_3, quat_quad_3, omega_quad_3))
 
         self.unit_vector_from_measurements = self.quadrotor_payload_unit_vector_c()
+        self.cable_angular_velocity_from_measurements = self.cable_angular_velocity_c()
+        self.quadrotor_position = self.quadrotor_position_c()
+        self.quadrotor_velocity = self.quadrotor_velocity_c()
+        self.quadrotor_acceleration = self.quadrotor_acceleration_c()
 
+        # Desired States
+        ## Desired states and control actions
+        self.xd = np.zeros((self.n_x, ), dtype=np.double)
+        self.ud = np.zeros((self.n_u, ), dtype=np.double)
+
+        self.xd[0] = 0.5
+        self.xd[1] = 0.5
+        self.xd[2] = 0.5
+
+        self.xd[3] = 0.0
+        self.xd[4] = 0.0
+        self.xd[5] = 0.0
+
+        theta1 = 1*np.pi/2
+        n1 = np.array([0.0, 0.0, 1.0])
+        qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
+
+        self.xd[6] = qd[0]
+        self.xd[7] = qd[1]
+        self.xd[8] = qd[2]
+        self.xd[9] = qd[3]
+
+        self.xd[10] = 0.0
+        self.xd[11] = 0.0
+        self.xd[12] = 0
+        self.xd[13] = 0.0
+        self.xd[14] = 0.0
+        self.xd[15] = -1
+        self.xd[16] = 0.0
+        self.xd[17] = 0.0
+        self.xd[18] = -1
+        self.xd[19] = 0.0
+        self.xd[20] = 0.0
+        self.xd[21] = -1
+        self.xd[22] = 0.0
+        self.xd[23] = 0.0
+        self.xd[24] = -1
+        self.xd[25] = 0.0
+        self.xd[26] = 0.0
+        self.xd[27] = 0
+        self.xd[28] = 0.0
+        self.xd[29] = 0.0
+        self.xd[30] = 0
+        self.xd[31] = 0.0
+        self.xd[32] = 0.0
+        self.xd[33] = 0
+        self.xd[34] = 0.0
+        self.xd[35] = 0.0
+        self.xd[36] = 0
+        ### Set Desired Control Actions
+        self.ud[0] = self.tensions_init[0]
+        self.ud[1] = self.tensions_init[1]
+        self.ud[2] = self.tensions_init[2]
+        self.ud[3] = self.tensions_init[3]
+
+        self.ud[4] = 0.0
+        self.ud[5] = 0.0
+        self.ud[6] = 0.0
+
+        self.ud[7] = 0.0
+        self.ud[8] = 0.0
+        self.ud[9] = 0.0
+
+        self.ud[10] = 0.0
+        self.ud[11] = 0.0
+        self.ud[12] = 0.0
+
+        self.ud[13] = 0.0
+        self.ud[14] = 0.0
+        self.ud[15] = 0.0
+
+        # Flag
+        self.flag = 0
+
+        # Control Loop
         self.timer = self.create_timer(self.ts, self.run)  # 0.01 seconds = 100 Hz
         self.start_time = time.time()
 
@@ -216,10 +302,22 @@ class PayloadControlMujocoNode(Node):
         x[4] = vx_i[1, 0]
         x[5] = vx_i[2, 0]
 
+        # Get quadrotor  positions
         xquadrotors = np.hstack((self.xq0_0[0:3], self.xq1_0[0:3], self.xq2_0[0:3], self.xq3_0[0:3])) 
+        # Get quadrotor  velocities
+        vquadrotors = np.hstack((self.xq0_0[3:6], self.xq1_0[3:6], self.xq2_0[3:6], self.xq3_0[3:6])) 
+
+        # Compute unit Vector
         unit = np.array(self.unit_vector_from_measurements(x, xquadrotors)).reshape((self.robot_num*3, ))
+
+        # Extended Vector of the Payload
         payload_states = np.hstack((x, unit))
-        self.x_0 = payload_states
+
+        # Compute cable angular velocity
+        r= np.array(self.cable_angular_velocity_from_measurements(payload_states, vquadrotors)).reshape((self.robot_num*3, ))
+
+        payload_states_full = np.hstack((x, unit, r))
+        self.x_0 = payload_states_full
         return None
 
     def callback_get_odometry_drone_0(self, msg):
@@ -729,8 +827,8 @@ class PayloadControlMujocoNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 0.1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 0.01*(r_dot_cmd.T@r_dot_cmd)
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 0.1*(r_error.T@r_error) 
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 1*(r_dot_cmd.T@r_dot_cmd)
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + error_n1.T@error_n1 + error_n2.T@error_n2 + error_n3.T@error_n3 + error_n4.T@error_n4 + 1*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -955,7 +1053,7 @@ class PayloadControlMujocoNode(Node):
         L = self.length
 
         # state & input
-        x = ca.MX.sym('x', 22, 1)
+        x = ca.MX.sym('x', 25, 1)
         xQ = ca.MX.sym('xQ', 3*m, 1)  # general: 3 thrust comps + 3m 'r' comps
 
         # unpack state
@@ -963,7 +1061,7 @@ class PayloadControlMujocoNode(Node):
         v_p   = x[3:6]      # 3x1
         quat  = x[6:10]     # 4x1
         omega = x[10:13]    # 3x1
-        nflat = x[13:13+3*m]
+        nflat = x[13:25]
         n     = ca.reshape(nflat, 3, m)  # 3 x m
 
         # unpack Quadrotor velocity
@@ -1218,28 +1316,99 @@ class PayloadControlMujocoNode(Node):
 
         self.tf_broadcaster.sendTransform([tf_world_load, tf_world_quad1, tf_world_quad2, tf_world_quad3, tf_world_quad4, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_payload_p4, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_p4, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_p4_q4])
         return None
-    def run(self):
 
-        xd_q0 = np.array([0.0, -2.5, 2.0], dtype=np.double)
+    def publish_prediction(self):
+        path_msgs = Path()
+        path_msgs.header.stamp = self.get_clock().now().to_msg()
+        path_msgs.header.frame_id = "world"
+        poses = []
+
+        for k in range(0, self.N_prediction):
+            x_k = self.acados_ocp_solver.get(k, "x")
+            xq = np.array(self.quadrotor_position(x_k)).reshape((self.robot_num*3, ))
+            pose = PoseStamped()
+            pose.header = path_msgs.header  # inherit timestamp & frame
+            pose.pose.position.x = xq[0]
+            pose.pose.position.y = xq[1]
+            pose.pose.position.z = xq[2]
+            poses.append(pose)
+            #arr_str = np.array2string(
+            #x_k, precision=3, separator=", ", suppress_small=True)
+            #self.get_logger().info(f"pred[] = {arr_str}")
+        path_msgs.poses = poses
+        self.publisher_prediction_drone_0.publish(path_msgs)
+        return None
+
+    def prepare(self):
+        if self.flag == 0:
+            self.flag = 1
+            # Init Optimization Problem
+            for k in range(5000):
+                arr_str = np.array2string(self.x_0, precision=3, separator=", ", suppress_small=True)
+                self.get_logger().info(f"state[] = {arr_str}")
+
+            self.ocp = self.solver(self.x_0)
+            self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
+
+            ### Reset Solver
+            self.acados_ocp_solver.reset()
+
+            ### Initial Conditions optimization problem
+            for stage in range(self.N_prediction + 1):
+                self.acados_ocp_solver.set(stage, "x", self.x_0)
+            for stage in range(self.N_prediction):
+                self.acados_ocp_solver.set(stage, "u", self.ud)
+        return None
+        
+    def run(self):
+        # Build Optimization Problem just once
+        self.prepare()
+
+        self.acados_ocp_solver.set(0, "lbx", self.x_0)
+        self.acados_ocp_solver.set(0, "ubx", self.x_0)
+
+        # Desired Trajectory of the system
+        for j in range(self.N_prediction):
+            yref = self.xd
+            uref = self.ud
+            aux_ref = np.hstack((yref, uref))
+            self.acados_ocp_solver.set(j, "p", aux_ref)
+        # Desired Trayectory at the last Horizon
+        yref_N = self.xd
+        uref_N = self.ud
+        aux_ref_N = np.hstack((yref_N, uref_N))
+        self.acados_ocp_solver.set(self.N_prediction, "p", aux_ref_N)
+        # Check Solution since there can be possible errors 
+        self.acados_ocp_solver.solve()
+
+        # get Control Actions and predictions
+        control = self.acados_ocp_solver.get(0, "u")
+        x_k = self.acados_ocp_solver.get(1, "x")
+
+        # Send Desired States Quadrotor
+        self.publish_prediction()
+
+        # Solve MPC
+        xd_q0 = np.array([0.0, -1.0, 2.0], dtype=np.double)
         vd_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q1 = np.array([0.0, -1.5, 2.0], dtype=np.double)
+        xd_q1 = np.array([0.0, 0.0, 2.0], dtype=np.double)
         vd_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q1 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q2 = np.array([1.0, -2.5, 2.0], dtype=np.double)
+        xd_q2 = np.array([1.0, -1.0, 2.0], dtype=np.double)
         vd_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q2 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        xd_q3 = np.array([1.13, -1.5, 2.0], dtype=np.double)
+        xd_q3 = np.array([1.13, 0.0, 2.0], dtype=np.double)
         vd_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         ad_q3 = np.array([0.0, 0.0, 0.0], dtype=np.double)
 
-        self.send_position_cmd(self.publisher_ref_drone_0, xd_q0, vd_q0, ad_q0)
-        self.send_position_cmd(self.publisher_ref_drone_1, xd_q1, vd_q1, ad_q1)
-        self.send_position_cmd(self.publisher_ref_drone_2, xd_q2, vd_q2, ad_q2)
-        self.send_position_cmd(self.publisher_ref_drone_3, xd_q3, vd_q3, ad_q3)
+        #self.send_position_cmd(self.publisher_ref_drone_0, xd_q0, vd_q0, ad_q0)
+        #self.send_position_cmd(self.publisher_ref_drone_1, xd_q1, vd_q1, ad_q1)
+        #self.send_position_cmd(self.publisher_ref_drone_2, xd_q2, vd_q2, ad_q2)
+        #self.send_position_cmd(self.publisher_ref_drone_3, xd_q3, vd_q3, ad_q3)
         self.publish_transforms()
 
 def main(arg = None):
