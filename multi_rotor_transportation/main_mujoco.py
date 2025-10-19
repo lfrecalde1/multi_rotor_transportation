@@ -138,6 +138,8 @@ class PayloadControlMujocoNode(Node):
         self.publisher_prediction_drone_2 = self.create_publisher(Path, "/drone_2/predicted_path", 10)
         self.publisher_prediction_drone_3 = self.create_publisher(Path, "/drone_3/predicted_path", 10)
 
+        self.publisher_prediction_payload = self.create_publisher(Path, "/payload/predicted_path", 10)
+
         # TF
         self.tf_broadcaster = TransformBroadcaster(self)
 
@@ -190,8 +192,8 @@ class PayloadControlMujocoNode(Node):
         self.xd = np.zeros((self.n_x, ), dtype=np.double)
         self.ud = np.zeros((self.n_u, ), dtype=np.double)
 
-        self.xd[0] = 0.7
-        self.xd[1] = 0.8
+        self.xd[0] = -2.0
+        self.xd[1] = 1.0
         self.xd[2] = 2.0
 
         self.xd[3] = 0.0
@@ -827,8 +829,8 @@ class PayloadControlMujocoNode(Node):
         tension_error = t_d - t_cmd
         r_error = r_d - r
 
-        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + 0.0*(error_n1.T@error_n1) + 0.0*(error_n2.T@error_n2) + 0.0*(error_n3.T@error_n3) + 0.0*(error_n4.T@error_n4) + 1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 1*(r_dot_cmd.T@r_dot_cmd)
-        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + 0.0*(error_n1.T@error_n1) + 0.0*(error_n2.T@error_n2) + 0.0*(error_n3.T@error_n3) + 0.0*(error_n4.T@error_n4) + 1*(r_error.T@r_error) 
+        ocp.model.cost_expr_ext_cost = lyapunov_position + lyapunov_orientation  + 0.1*(error_n1.T@error_n1) + 0.1*(error_n2.T@error_n2) + 0.1*(error_n3.T@error_n3) + 0.1*(error_n4.T@error_n4) + 1*(r_error.T@r_error) + 1*(tension_error.T@tension_error) + 1*(r_dot_cmd.T@r_dot_cmd)
+        ocp.model.cost_expr_ext_cost_e = lyapunov_position + lyapunov_orientation + 0.1*(error_n1.T@error_n1) + 0.1*(error_n2.T@error_n2) + 0.1*(error_n3.T@error_n3) + 0.1*(error_n4.T@error_n4) + 1*(r_error.T@r_error) 
 
         ref_params = np.hstack((self.x_0, self.u_equilibrium))
 
@@ -1319,17 +1321,27 @@ class PayloadControlMujocoNode(Node):
     def publish_prediction(self):
         # Create one Path message per drone
         path_msgs = []
+        payload_msgs = []
+
+        # Quadrotors
         for i in range(self.robot_num):
             msg = Path()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "world"
             path_msgs.append(msg)
-
+        
+        # Payload
+        msg = Path()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "world"
+        payload_msgs.append(msg)
+        
         # Fill poses for each drone
         for k in range(self.N_prediction):
             x_k = self.acados_ocp_solver.get(k, "x")
             xq = np.array(self.quadrotor_position(x_k)).reshape((self.robot_num * 3,))
 
+            # Quadrotor positions
             for i in range(self.robot_num):
                 pose = PoseStamped()
                 pose.header = path_msgs[i].header
@@ -1338,11 +1350,20 @@ class PayloadControlMujocoNode(Node):
                 pose.pose.position.z = xq[3*i + 2]
                 path_msgs[i].poses.append(pose)
 
+            # Payload positions
+            pose = PoseStamped()
+            pose.header = payload_msgs[0].header
+            pose.pose.position.x = x_k[0]
+            pose.pose.position.y = x_k[1]
+            pose.pose.position.z = x_k[2]
+            payload_msgs[0].poses.append(pose)
+
         # Publish each drone’s path
         self.publisher_prediction_drone_0.publish(path_msgs[0])
         self.publisher_prediction_drone_1.publish(path_msgs[1])
         self.publisher_prediction_drone_2.publish(path_msgs[2])
         self.publisher_prediction_drone_3.publish(path_msgs[3])
+        self.publisher_prediction_payload.publish(payload_msgs[0])
 
     def geometric_control(self, xd, vd, ad, t, n):
         # Control Error
@@ -1361,7 +1382,7 @@ class PayloadControlMujocoNode(Node):
                 self.get_logger().info(f"state[] = {arr_str}")
 
             self.ocp = self.solver(self.x_0)
-            self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= True, generate= True)
+            self.acados_ocp_solver = AcadosOcpSolver(self.ocp, json_file="acados_ocp_" + self.ocp.model.name + ".json", build= False, generate= False)
 
             ### Reset Solver
             self.acados_ocp_solver.reset()
