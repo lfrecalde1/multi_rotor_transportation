@@ -3,7 +3,7 @@ import mujoco.viewer
 import numpy as np
 
 def main():
-    model = mujoco.MjModel.from_xml_path("drone.xml")
+    model = mujoco.MjModel.from_xml_path("/home/ros2_ws/src/multi_rotor_transportation/model/simple_drone_payload_mujoco.xml")
     data = mujoco.MjData(model)
 
     geometric_names = [] 

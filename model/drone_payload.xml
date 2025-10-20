@@ -237,7 +237,7 @@
         rgba="0 0 1 0.8"
         mass="0.17"
         friction="1.0 0.005 0.0001"/>
-      <site name="payload_point" pos="0.0 0.0 0.04"/>
+      <site name="payload_point" pos="0.0 0.0 0.05"/>
       <!--  Representation of the body frame   -->
       <!-- <site name="load_X" type="box" pos="0.05 0.0 0.0" size="0.05 0.005 0.005" quat=" 1.0 0.0 0.0 0." rgba="1 0 0 1"/>
       <site name="load_Y" type="box" pos="0.0 0.05 0.0" size="0.05 0.005 0.005" quat=" 0.707 0.0 0.0 0.707" rgba="0 1 0 1"/>

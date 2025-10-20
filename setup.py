@@ -23,6 +23,8 @@ setup(
             'payload_dynamics = multi_rotor_transportation.main:main',
             'payload_control = multi_rotor_transportation.main_acceleration:main',
             'payload_control_mujoco = multi_rotor_transportation.main_mujoco:main',
+            'payload_simple_control = multi_rotor_transportation.main_simple_payload:main',
+            'payload_simple_mujoco = multi_rotor_transportation.main_simple_mujoco:main',
         ],
     },
 )
