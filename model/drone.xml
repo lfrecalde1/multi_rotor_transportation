@@ -29,7 +29,7 @@
       rgba="1 1 1 1" friction="1.0 0.005 0.0001" condim="3"/>
 
       <!--Quadrotor 0 -->
-    <body name="drone_0" pos="0.0 0.0 2" euler="0 0 0">
+    <body name="drone_0" pos="-1.0 0.0 2" euler="0 0 0">
       <joint name="drone_0" type="free" damping="0.001" armature="0" pos="0 0 0"/>
 
       <!-- Core: bright yellow for visibility -->
@@ -74,9 +74,18 @@
       <site name="rateZ" type="box" pos="0 0 0" quat="1. 0. 0. 0." size="0.035 0.035 0.015" rgba="0 1 1 1"/>
       <site name="imu" pos="0 0 0"/>
       <site name="payload_point_drone_0" pos="0.0 0.0 -0.0"/>
-      
-      <camera name="camera_0" pos="0.035 0 -0.015" euler="0 0 -1.57"/>
+      <camera name="camera_0"
+        pos="0.035 0 -0.015"
+        quat="0.6533 0.2706 -0.2706 -0.6533" />
     </body>
+
+      <geom name="barrel" type="cylinder" pos="4 0.1 2" size="0.1 2" rgba="0.2 0.2 0.7 1"/>
+      <geom name="barrel2" type="cylinder" pos="2 -0.1 2" size="0.1 2" rgba="0.2 0.7 0.7 1"/>
+      <geom name="barrel3" type="cylinder" pos="6 0 2" size="0.1 2" rgba="0.7 0.7 0.7 1"/>
+      <geom name="tall_box" type="box" pos="0.0 0.0 0.1" size="0.2 0.1 0.1" rgba="0.2 0.6 0.2 1"/>
+      <geom name="metal_sphere" type="sphere" pos="-0.5 0.0 0.2" size="0.1" rgba="0.4 0.4 0.4 1"/>
+
+
   </worldbody>
 
   <actuator>
@@ -108,8 +117,8 @@
       <config key="color_topic_name" value="/drone_0/image/color"/>
       <config key="depth_topic_name" value="/drone_0/image/depth"/>
       <config key="info_topic_name" value="/drone_0/image/camera_info"/>
-      <config key="height" value="240"/>
-      <config key="width" value="320"/>
+      <config key="height" value="480"/>
+      <config key="width" value="640"/>
       <config key="publish_rate" value="30"/>
     </plugin>
   </sensor>

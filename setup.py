@@ -25,6 +25,7 @@ setup(
             'payload_control_mujoco = multi_rotor_transportation.main_mujoco:main',
             'payload_simple_control = multi_rotor_transportation.main_simple_payload:main',
             'payload_simple_mujoco = multi_rotor_transportation.main_simple_mujoco:main',
+            'point_mass = multi_rotor_transportation.point_mass:main',
         ],
     },
 )
